@@ -1,0 +1,29 @@
+# NLP Experimentation Workbench - Dependencies
+# Tested with Python 3.10 - 3.13 on NVIDIA RTX 3050 (Ampere) & CPU-only environments
+
+# --- Core Data Science & Classical ML ---
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# --- Visualization ---
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# --- Deep Learning & Transformers (CUDA / CPU) ---
+# Note: For CUDA-enabled PyTorch, install according to https://pytorch.org/get-started/locally/
+torch>=2.0.0
+transformers>=4.36.0
+sentence-transformers>=2.3.0
+datasets>=2.16.0
+accelerate>=0.25.0
+
+# --- Specialized NLP Evaluation & Retrieval ---
+seqeval>=1.2.2          # Entity-level NER evaluation (Precision, Recall, F1 with BIO tags)
+evaluate>=0.4.0         # Unified HuggingFace metric evaluation
+rouge-score>=0.1.2      # Text summarization metrics (ROUGE-1, ROUGE-2, ROUGE-L)
+sacrebleu>=2.4.0        # Machine translation metrics (BLEU, chrF)
+rank-bm25>=0.2.2        # Lexical Information Retrieval (Okapi BM25)
+optuna>=3.5.0           # Hyperparameter optimization framework
