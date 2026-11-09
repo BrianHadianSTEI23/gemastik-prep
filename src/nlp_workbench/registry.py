@@ -45,6 +45,12 @@ class ModelRecord:
     is_inference_only: bool = False
     notes: str = ""
 
+    @property
+    def is_trainable(self) -> bool:
+        if self.is_inference_only:
+            return False
+        return any(op in self.supported_operations for op in ["training", "fine-tuning", "train", "finetune"])
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "model_id": self.model_id,
@@ -120,9 +126,30 @@ class ArchitectureRegistry:
         task: str,
         language: str = "indonesian",
         device: str = "auto",
+        max_vram_gb: Optional[float] = None,
     ) -> List[ModelRecord]:
-        """Returns models compatible with the specified task and language."""
-        return self.list_models(task=task, language=language)
+        """Returns models compatible with the specified task, language, and hardware constraints."""
+        candidates = self.list_models(task=task, language=language)
+        if max_vram_gb is not None:
+            filtered = []
+            for m in candidates:
+                tier = m.vram_tier.lower()
+                if "cpu" in tier:
+                    filtered.append(m)
+                elif "rtx 3050" in tier:
+                    if max_vram_gb >= 4.0:
+                        filtered.append(m)
+                elif ">=8gb" in tier or "8gb" in tier:
+                    if max_vram_gb >= 8.0:
+                        filtered.append(m)
+                elif "6gb" in tier:
+                    if max_vram_gb >= 6.0:
+                        filtered.append(m)
+                else:
+                    filtered.append(m)
+            candidates = filtered
+
+        return candidates
 
     def validate_model_configuration(self, model_id: str, task: str, language: str) -> None:
         """Validates that model_id supports the specified task and language."""
@@ -534,7 +561,7 @@ class ArchitectureRegistry:
             adapter_cls=SummarizationAdapter,
             adapter_kwargs={"checkpoint": "t5-small"},
             is_inference_only=True,
-            notes="Compact encoder-decoder model fitting comfortably in 4GB VRAM."
+            notes="Compact encoder-decoder model fitting comfortably in 4GB VRAM. Requires 'summarize: ' task prefix during inference.",
         ))
 
         # I. Machine Translation
@@ -552,7 +579,7 @@ class ArchitectureRegistry:
             adapter_cls=TranslationAdapter,
             adapter_kwargs={"checkpoint": "Helsinki-NLP/opus-mt-id-en", "source_lang": "id", "target_lang": "en"},
             is_inference_only=True,
-            notes="Dedicated bilingual translation model for Indonesian to English."
+            notes="Dedicated bilingual translation model for Indonesian to English.",
         ))
         self.register(ModelRecord(
             model_id="translation_mt5",
@@ -562,13 +589,13 @@ class ArchitectureRegistry:
             checkpoint="google/mt5-small",
             supported_tasks=["translation"],
             supported_languages=["Indonesian", "Multilingual", "English"],
-            supported_operations=["inference", "evaluation"],
+            supported_operations=["fine-tuning", "training", "evaluation"],
             vram_tier="RTX 3050 (bs=2-4, fp16)",
             evaluation_metrics=["SacreBLEU", "chrF"],
             adapter_cls=TranslationAdapter,
             adapter_kwargs={"checkpoint": "google/mt5-small"},
-            is_inference_only=True,
-            notes="Pretrained on mC4 covering 101 languages."
+            is_inference_only=False,
+            notes="Pretrained base multilingual encoder-decoder checkpoint (mC4 span-masking). Requires supervised fine-tuning for translation; zero-shot output without fine-tuning produces masked spans.",
         ))
         self.register(ModelRecord(
             model_id="translation_nllb",

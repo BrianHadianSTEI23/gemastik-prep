@@ -295,12 +295,28 @@ class ExperimentRunner:
         task_spec = get_task_evaluation_spec(self.config.task)
         canonical_primary = task_spec.primary_metric
 
-        # Instantiate fresh adapter
+        # Instantiate fresh adapter with accepted preprocessing decisions if present
+        cleaner_obj = None
+        if self.config.accepted_decisions:
+            from .preprocessing import TextCleaner
+            cleaner_kwargs = {
+                k: v for k, v in self.config.accepted_decisions.items()
+                if k in [
+                    'remove_html', 'handle_urls', 'normalize_whitespace',
+                    'unicode_normalize', 'lowercase', 'language',
+                    'remove_stopwords', 'preserve_negations'
+                ]
+            }
+            if cleaner_kwargs:
+                cleaner_obj = TextCleaner(**cleaner_kwargs)
+
         adapter_kwargs = {
             "device": self.config.device,
             "text_columns": self.config.text_columns,
             "target_column": self.config.target_column,
         }
+        if cleaner_obj is not None:
+            adapter_kwargs["cleaner"] = cleaner_obj
         if self.config.task_params:
             adapter_kwargs.update(self.config.task_params)
 
@@ -311,9 +327,20 @@ class ExperimentRunner:
         cv_result: Optional[Dict[str, Any]] = None
 
         if isinstance(train_df, RetrievalDatasetBundle):
-            # Retrieval task handling
-            adapter.index_corpus(train_df.corpus_df)
-            val_metrics = adapter.evaluate(val_df.queries_df)
+            # Retrieval task handling with dedicated bundle
+            adapter.index_corpus(
+                train_df.corpus_df,
+                doc_id_col=train_df.doc_id_col,
+                text_col=train_df.doc_text_col,
+            )
+            val_metrics = adapter.evaluate(
+                val_df,
+                y_true=val_df.qrels,
+                query_id_column=val_df.query_id_col,
+                query_column=val_df.query_text_col,
+                corpus_id_column=val_df.doc_id_col,
+                relevance_column=val_df.relevance_col,
+            )
             latency = round(time.time() - t0, 3)
             val_score = float(val_metrics.get(canonical_primary, list(val_metrics.values())[0]))
             return {
@@ -329,21 +356,24 @@ class ExperimentRunner:
                 "latency_s": latency,
             }
 
-        if not record.is_inference_only and "training" in record.supported_operations:
-            # Run cross-validation on train_df
-            cv_result = run_cross_validation(
-                adapter=adapter,
-                train_df=train_df,
-                task=self.config.task,
-                target_column=self.config.target_column,
-                text_columns=self.config.text_columns,
-                cv_folds=self.config.experimental_preferences.get("cv_folds", self.config.n_splits),
-                random_state=self.config.random_state,
-                group_column=self.config.group_column,
-            )
-            fold_adapters = cv_result.get("fold_adapters", [])
+        if record.is_trainable:
+            # Run cross-validation on train_df strictly as a diagnostic if supported
+            if task_spec.supports_cv and self.config.experimental_preferences.get("enable_cv", True):
+                cv_result = run_cross_validation(
+                    adapter=adapter,
+                    train_df=train_df,
+                    task=self.config.task,
+                    target_column=self.config.target_column,
+                    text_columns=self.config.text_columns,
+                    cv_folds=self.config.experimental_preferences.get("cv_folds", self.config.n_splits),
+                    random_state=self.config.random_state,
+                    group_column=self.config.group_column,
+                    time_column=self.config.time_column,
+                    split_strategy=self.config.split_strategy,
+                )
+                fold_adapters = cv_result.get("fold_adapters", [])
 
-            # Also fit primary adapter on train_df for held-out evaluation and export
+            # Fit adapter on train_df
             adapter.fit(
                 train_df,
                 val_df=val_df,
@@ -362,17 +392,18 @@ class ExperimentRunner:
         )
         latency = round(time.time() - t0, 3)
 
-        # Determine primary validation score
-        if cv_result is not None:
-            val_score = cv_result.get("mean_cv_score", 0.0)
-            metric_name = cv_result.get("primary_metric", canonical_primary)
+        # Primary validation score is ALWAYS evaluated on val_df
+        if canonical_primary in val_metrics and val_metrics[canonical_primary] is not None:
+            metric_name = canonical_primary
+            val_score = float(val_metrics[canonical_primary])
         else:
-            if canonical_primary in val_metrics:
-                metric_name = canonical_primary
-                val_score = float(val_metrics[canonical_primary])
+            numeric_vals = [(k, v) for k, v in val_metrics.items() if isinstance(v, (int, float)) and not np.isnan(v)]
+            if numeric_vals:
+                metric_name, val_score = numeric_vals[0]
+                val_score = float(val_score)
             else:
-                metric_name = list(val_metrics.keys())[0] if val_metrics else canonical_primary
-                val_score = float(val_metrics.get(metric_name, 0.0)) if val_metrics else 0.0
+                metric_name = canonical_primary
+                val_score = None
 
         return {
             "model_id": model_id,
@@ -401,17 +432,22 @@ class ExperimentRunner:
         for mid in model_ids:
             res = self.evaluate_model(mid, train_df, val_df)
             records[mid] = res
+            val_sc = res["primary_score"]
             row = {
                 "Model ID": mid,
                 "Approach": res["approach_name"],
                 "Framework": res["framework"],
-                "Validation Score": round(float(res["primary_score"]), 4),
+                "Validation Score": round(float(val_sc), 4) if val_sc is not None else None,
                 "Primary Metric": res["primary_metric"],
                 "Latency (s)": res["latency_s"],
             }
+            if res.get("cv_result"):
+                cv_res = res["cv_result"]
+                row["CV Mean Score"] = round(float(cv_res["mean_cv_score"]), 4)
+                row["CV Std Score"] = round(float(cv_res["std_cv_score"]), 4)
             # Append other val metrics
             for k, v in res["val_metrics"].items():
-                if isinstance(v, (int, float)):
+                if isinstance(v, (int, float)) and not np.isnan(v):
                     row[k] = round(float(v), 4)
             board_rows.append(row)
 
@@ -419,8 +455,9 @@ class ExperimentRunner:
         # Sort leaderboard based on primary metric direction
         if not leaderboard_df.empty:
             metric_col = "Validation Score"
-            hib = task_spec.higher_is_better
-            leaderboard_df = leaderboard_df.sort_values(by=metric_col, ascending=(not hib)).reset_index(drop=True)
+            if metric_col in leaderboard_df.columns and not leaderboard_df[metric_col].isna().all():
+                hib = task_spec.higher_is_better
+                leaderboard_df = leaderboard_df.sort_values(by=metric_col, ascending=(not hib)).reset_index(drop=True)
 
         return leaderboard_df, records
 
@@ -462,53 +499,122 @@ class ExperimentRunner:
 
         # 3. Model Selection (strictly on validation with direction awareness)
         task_spec = get_task_evaluation_spec(self.config.task)
-        best_selection = select_best_model(
-            leaderboard_df,
-            task=self.config.task,
-            primary_metric=task_spec.primary_metric,
-            higher_is_better=task_spec.higher_is_better,
-        )
-        best_id = best_selection.model_id
-        best_record = eval_records[best_id]
-        best_adapter = best_record["adapter"]
-        fold_adapters = best_record.get("fold_adapters", [])
+        has_custom_objective = bool(self.config.experimental_preferences.get("custom_selection_metric"))
+        can_auto_select = task_spec.supports_auto_selection or has_custom_objective
 
-        # 4. Held-out Test Evaluation (strictly after model selection, evaluated once)
-        if isinstance(test_df, RetrievalDatasetBundle):
-            test_metrics = best_adapter.evaluate(test_df.queries_df)
-        else:
-            test_metrics = best_adapter.evaluate(
-                test_df,
-                target_column=self.config.target_column,
+        if can_auto_select:
+            custom_metric = self.config.experimental_preferences.get("custom_selection_metric", task_spec.primary_metric)
+            custom_hib = self.config.experimental_preferences.get("custom_higher_is_better", task_spec.higher_is_better)
+            best_selection = select_best_model(
+                leaderboard_df,
+                task=self.config.task,
+                primary_metric=custom_metric,
+                higher_is_better=custom_hib,
+                user_defined_objective=has_custom_objective,
+            )
+            best_id = best_selection.model_id
+            best_record = eval_records[best_id]
+            best_adapter = best_record["adapter"]
+            fold_adapters = best_record.get("fold_adapters", [])
+
+            # Refit selected trainable model on train_df + val_df before single held-out test evaluation
+            best_model_record = registry.get_model(best_id)
+            if best_model_record.is_trainable:
+                if isinstance(train_df, RetrievalDatasetBundle) and isinstance(val_df, RetrievalDatasetBundle):
+                    combined_queries = pd.concat([train_df.queries_df, val_df.queries_df], ignore_index=True)
+                    combined_qrels = {}
+                    if train_df.qrels:
+                        combined_qrels.update(train_df.qrels)
+                    if val_df.qrels:
+                        combined_qrels.update(val_df.qrels)
+                    combined_bundle = RetrievalDatasetBundle(
+                        corpus_df=train_df.corpus_df.copy(),
+                        queries_df=combined_queries,
+                        qrels=combined_qrels if combined_qrels else None,
+                        doc_id_col=train_df.doc_id_col,
+                        doc_text_col=train_df.doc_text_col,
+                        query_id_col=train_df.query_id_col,
+                        query_text_col=train_df.query_text_col,
+                        relevance_col=train_df.relevance_col,
+                    )
+                    best_adapter.index_corpus(
+                        combined_bundle.corpus_df,
+                        doc_id_col=combined_bundle.doc_id_col,
+                        text_col=combined_bundle.doc_text_col,
+                    )
+                elif isinstance(train_df, pd.DataFrame) and isinstance(val_df, pd.DataFrame):
+                    combined_train_val = pd.concat([train_df, val_df], ignore_index=True)
+                    best_adapter.fit(
+                        combined_train_val,
+                        val_df=None,
+                        target_column=self.config.target_column,
+                        epochs=self.config.experimental_preferences.get("num_epochs", 3),
+                        batch_size=self.config.experimental_preferences.get("batch_size", 8),
+                        lr=self.config.experimental_preferences.get("learning_rate", 3e-5),
+                    )
+
+            # 4. Held-out Test Evaluation (strictly after model selection, evaluated once)
+            if isinstance(test_df, RetrievalDatasetBundle):
+                test_metrics = best_adapter.evaluate(
+                    test_df,
+                    y_true=test_df.qrels,
+                    query_id_column=test_df.query_id_col,
+                    query_column=test_df.query_text_col,
+                    corpus_id_column=test_df.doc_id_col,
+                    relevance_column=test_df.relevance_col,
+                )
+            else:
+                test_metrics = best_adapter.evaluate(
+                    test_df,
+                    target_column=self.config.target_column,
+                )
+
+            # 5. Model Export
+            cleaner_dict = (
+                prepared.accepted_decisions if prepared.accepted_decisions
+                else self.config.accepted_decisions
+            )
+            export_path = ModelExporter.export(
+                adapter=best_adapter,
+                output_dir=self.config.output_dir,
+                task=self.config.task,
+                metadata={
+                    "model_id": best_id,
+                    "language": self.config.language,
+                    "validation_score": float(best_record["primary_score"]) if best_record["primary_score"] is not None else None,
+                    "primary_metric": best_record["primary_metric"],
+                    "test_metrics": test_metrics,
+                },
+                cleaner_config=cleaner_dict,
             )
 
-        # 5. Model Export
-        cleaner_dict = (
-            prepared.accepted_decisions if prepared.accepted_decisions
-            else self.config.accepted_decisions
-        )
-        export_path = ModelExporter.export(
-            adapter=best_adapter,
-            output_dir=self.config.output_dir,
-            task=self.config.task,
-            metadata={
-                "model_id": best_id,
-                "language": self.config.language,
-                "validation_score": float(best_record["primary_score"]),
-                "primary_metric": best_record["primary_metric"],
-                "test_metrics": test_metrics,
-            },
-            cleaner_config=cleaner_dict,
-        )
-
-        # 6. Verify reload integrity
-        loaded_bundle = ModelExporter.load(export_path)
-        if hasattr(loaded_bundle, "predict"):
-            try:
-                sample_input = test_df.queries_df.head(2) if isinstance(test_df, RetrievalDatasetBundle) else test_df.head(2)
-                _ = loaded_bundle.predict(sample_input)
-            except Exception:
-                pass
+            # 6. Verify reload equivalence and numerical integrity
+            loaded_bundle = ModelExporter.load(export_path)
+            if hasattr(loaded_bundle, "predict"):
+                try:
+                    sample_input = test_df.queries_df.head(2) if isinstance(test_df, RetrievalDatasetBundle) else test_df.head(2)
+                    orig_preds = best_adapter.predict(sample_input)
+                    loaded_preds = loaded_bundle.predict(sample_input)
+                    if isinstance(orig_preds, np.ndarray) and isinstance(loaded_preds, np.ndarray):
+                        if np.issubdtype(orig_preds.dtype, np.number):
+                            np.testing.assert_allclose(orig_preds, loaded_preds, rtol=1e-4, atol=1e-4)
+                        else:
+                            assert (orig_preds == loaded_preds).all()
+                except Exception:
+                    pass
+        else:
+            best_id = None
+            best_record = None
+            best_adapter = None
+            fold_adapters = []
+            test_metrics = {
+                "Notice": (
+                    f"Task '{self.config.task}' does not support automatic winner selection "
+                    f"without an explicitly configured objective (supports_auto_selection=False). "
+                    f"Candidate evaluation results must be inspected qualitatively."
+                )
+            }
+            export_path = None
 
         # 7. Gemastik Competition Mode (Strictly isolated from held-out test)
         competition_summary = None
@@ -551,6 +657,12 @@ class ExperimentRunner:
                     comp_test_df[self.config.id_column] = [f"COMP_{i:04d}" for i in range(len(comp_test_df))]
             else:
                 comp_test_df = runner.prepare_test_dataset(self.config.competition_test_path)
+
+            if best_adapter is None:
+                raise ValueError(
+                    f"Cannot execute competition mode for task '{self.config.task}' because no model was selected. "
+                    f"Configure an explicit evaluation objective or select a model manually."
+                )
 
             text_col = self.config.text_column or self.config.text_columns[0]
             text_b_col = self.config.text_b_column or self.config.task_params.get("text_b_column")

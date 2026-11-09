@@ -37,7 +37,7 @@ class ZeroShotClassificationAdapter(BaseTaskAdapter):
         ]
         self.hypothesis_template = hypothesis_template
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner(lowercase=False)
+        self.cleaner = kwargs.get("cleaner") or TextCleaner(lowercase=False)
         self.pipeline = None
         self.device = HardwareManager.inspect(device).get_torch_device()
         self.is_trained = True  # Pretrained zero-shot models are ready for inference

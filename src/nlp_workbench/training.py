@@ -58,6 +58,26 @@ def run_cross_validation(
 
     folds_count = n_splits or cv_folds or 5
 
+    # Check task cross-validation support
+    try:
+        spec = get_task_evaluation_spec(task)
+        if not spec.supports_cv:
+            raise ValueError(
+                f"Task '{task}' does not support cross-validation (supports_cv=False). "
+                f"Cross-validation is only valid for tasks with repeatable supervised splits (e.g. classification, regression, ner)."
+            )
+        primary_metric_key = spec.primary_metric
+    except KeyError:
+        primary_metric_key = "Macro-F1" if task == "classification" else ("MAE" if task == "regression" else "Score")
+
+    # Time-based ordering if configured
+    time_column = kwargs.get("time_column") or kwargs.get("time_col")
+    split_strategy = kwargs.get("split_strategy") or kwargs.get("strategy")
+    if time_column:
+        if time_column not in data.columns:
+            raise ValueError(f"Configured time_column '{time_column}' not found in cross-validation dataset.")
+        data = data.sort_values(by=time_column).reset_index(drop=True)
+
     # Determine factory
     effective_adapter = adapter or adapter_factory
     if effective_adapter is None:
@@ -88,6 +108,8 @@ def run_cross_validation(
         n_splits=folds_count,
         random_state=random_state,
         group_column=group_column,
+        time_column=time_column,
+        strategy=split_strategy,
     )
 
     y_series = data[target] if target in data.columns else None
@@ -95,12 +117,6 @@ def run_cross_validation(
     fold_results = []
     fold_adapters = []
     oof_predictions = [None] * len(data)
-
-    try:
-        spec = get_task_evaluation_spec(task)
-        primary_metric_key = spec.primary_metric
-    except KeyError:
-        primary_metric_key = "Macro-F1" if task == "classification" else ("MAE" if task == "regression" else "Score")
 
     split_generator = cv.split(data, y=y_series, groups=data[group_column] if group_column else None)
 
@@ -167,19 +183,29 @@ def select_best_model(
     task: Optional[str] = None,
     primary_metric: Optional[str] = None,
     higher_is_better: Optional[bool] = None,
+    user_defined_objective: bool = False,
 ) -> BestModelSelection:
     """
-    Selects winning model strictly based on validation/cross-validation scores.
+    Selects winning model strictly based on validation scores.
     The held-out test set is NEVER used for model selection.
     Automatically respects metric direction (e.g. minimizing MAE/RMSE/loss, maximizing F1/accuracy),
     enforces fair comparison across candidates on the same metric, and rejects incompatible comparisons.
+    Refuses auto-selection for tasks without a defensible scalar objective unless user_defined_objective=True.
     """
     if task:
         spec = get_task_evaluation_spec(task)
-        if not spec.supports_auto_selection and primary_metric is None and higher_is_better is None:
+        if not spec.supports_auto_selection and not user_defined_objective:
             raise ValueError(
-                f"Task '{task}' does not support automatic winner selection without an explicitly configured primary metric and direction."
+                f"Task '{task}' does not support automatic winner selection without an explicit user-defined objective preference. "
+                f"Evaluation results must be reviewed qualitatively."
             )
+
+    # Reject non-defensible quality metrics
+    if primary_metric in ["Average Generated Words", "Avg Output Words (descriptive)", "Word Count"]:
+        raise ValueError(
+            f"Metric '{primary_metric}' cannot be used as an automatic quality metric for model selection. "
+            f"Word count reflects verbosity, not generation quality."
+        )
 
     if isinstance(leaderboard, list):
         if not leaderboard:

@@ -38,7 +38,7 @@ class ClassicalClassificationAdapter(BaseTaskAdapter):
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
         self.ngram_range = kwargs.get("ngram_range", (1, 2))
         self.max_features = kwargs.get("max_features", 15000)
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.classes_ = np.array([])
         self._build_pipeline()
 
@@ -162,6 +162,7 @@ class ClassicalClassificationAdapter(BaseTaskAdapter):
             "label_encoder": self.label_encoder,
             "text_columns": self.text_columns,
             "classes": list(self.label_encoder.classes_),
+            "cleaner": self.cleaner,
         }
         joblib.dump(bundle, p)
         return p
@@ -169,9 +170,11 @@ class ClassicalClassificationAdapter(BaseTaskAdapter):
     @classmethod
     def load(cls, artifact_path: Union[str, Path]) -> "ClassicalClassificationAdapter":
         bundle = joblib.load(artifact_path)
-        adapter = cls(model_id=bundle["model_id"], text_columns=bundle["text_columns"])
+        adapter = cls(model_id=bundle["model_id"], text_columns=bundle["text_columns"], cleaner=bundle.get("cleaner"))
         adapter.pipeline = bundle["pipeline"]
         adapter.label_encoder = bundle["label_encoder"]
+        if "cleaner" in bundle and bundle["cleaner"] is not None:
+            adapter.cleaner = bundle["cleaner"]
         adapter.is_trained = True
         return adapter
 
@@ -201,7 +204,7 @@ class TransformerClassificationAdapter(BaseTaskAdapter):
         self.learning_rate = learning_rate
         self.label_encoder = LabelEncoder()
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner(lowercase=False)  # Preserve case for cased transformers
+        self.cleaner = kwargs.get("cleaner") or TextCleaner(lowercase=False)  # Preserve case for cased transformers
         self.model = None
         self.tokenizer = None
         self.device = HardwareManager.inspect(device).get_torch_device()

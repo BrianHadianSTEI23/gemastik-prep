@@ -42,7 +42,7 @@ class TopicModelingAdapter(BaseTaskAdapter):
         self.embedding_checkpoint = embedding_checkpoint
         self.language = language.lower()
         self.text_columns: List[str] = kwargs.get("text_columns", ["content"])
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.vectorizer = None
         self.model = None
         self.topic_keywords: List[List[str]] = []

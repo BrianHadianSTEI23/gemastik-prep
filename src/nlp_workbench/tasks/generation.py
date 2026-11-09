@@ -92,17 +92,9 @@ class GenerationAdapter(BaseTaskAdapter):
         preds = self.predict(df)
         latency_ms = ((time.time() - t0) / max(1, len(df))) * 1000
 
-        avg_len = sum(len(p.split()) for p in preds) / max(1, len(preds))
-        res = {
-            "Average Generated Words": round(float(avg_len), 2),
-            "Latency/Sample (ms)": round(latency_ms, 3),
-        }
-        if y_true is not None or target_col in df.columns:
-            from ..evaluation import evaluate_summarization
-            refs = y_true if y_true is not None else df[target_col].astype(str).tolist()
-            rouge_metrics = evaluate_summarization(refs, preds)
-            res.update(rouge_metrics)
-        return res
+        from ..evaluation import evaluate_generation
+        refs = y_true if y_true is not None else (df[target_col].astype(str).tolist() if target_col in df.columns else None)
+        return evaluate_generation(references=refs, predictions=preds, latencies=[latency_ms])
 
     def export(self, export_path: Union[str, Path]) -> Path:
         p = Path(export_path)

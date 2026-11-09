@@ -156,37 +156,76 @@ class RetrievalAdapter(BaseTaskAdapter):
     def retrieve_ids(self, query: str, top_k: int = 5) -> List[str]:
         return [r["doc_id"] for r in self.retrieve(query, top_k=top_k)]
 
-    def predict(self, df: pd.DataFrame, **kwargs) -> Dict[str, List[str]]:
-        """Retrieves top documents for all queries in df."""
-        q_col = kwargs.get("query_column", "query")
-        qid_col = kwargs.get("query_id_column", "query_id")
-        ranked_results = {}
-        for idx, row in df.iterrows():
+    def predict(self, df: Any, **kwargs) -> Dict[str, List[str]]:
+        """Retrieves top documents for all queries in df or RetrievalDatasetBundle."""
+        from ..data import RetrievalDatasetBundle
+        if isinstance(df, RetrievalDatasetBundle):
+            q_df = df.queries_df
+            q_col = kwargs.get("query_column", df.query_text_col)
+            qid_col = kwargs.get("query_id_column", df.query_id_col)
+        elif isinstance(df, pd.DataFrame):
+            q_df = df
+            q_col = kwargs.get("query_column", "query")
+            qid_col = kwargs.get("query_id_column", "query_id")
+        else:
+            raise TypeError(f"Unsupported input type for retrieval predict: {type(df)}")
+
+        # Deduplicate queries to avoid redundant retrieval / encoding
+        query_text_to_ids = {}
+        id_to_text = {}
+        for idx, row in q_df.iterrows():
             qid = str(row.get(qid_col, f"Q_{idx}"))
             q_text = str(row.get(q_col, row.iloc[0]))
-            ranked_results[qid] = self.retrieve_ids(q_text, top_k=self.top_k)
+            id_to_text[qid] = q_text
+            if q_text not in query_text_to_ids:
+                query_text_to_ids[q_text] = []
+            query_text_to_ids[q_text].append(qid)
+
+        unique_results = {}
+        for q_text in query_text_to_ids.keys():
+            unique_results[q_text] = self.retrieve_ids(q_text, top_k=self.top_k)
+
+        ranked_results = {}
+        for qid, q_text in id_to_text.items():
+            ranked_results[qid] = unique_results[q_text]
         return ranked_results
 
-    def evaluate(self, df: pd.DataFrame, y_true: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
+    def evaluate(self, df: Any, y_true: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
         """Evaluates retrieval against ground truth relevance judgements."""
+        from ..data import RetrievalDatasetBundle
         t0 = time.time()
         ranked = self.predict(df, **kwargs)
-        latency_ms = ((time.time() - t0) / max(1, len(df))) * 1000
+        n_queries = len(ranked)
+        latency_ms = ((time.time() - t0) / max(1, n_queries)) * 1000
 
-        # Construct qrels from df if available
-        qrels = {}
-        qid_col = kwargs.get("query_id_column", "query_id")
-        did_col = kwargs.get("corpus_id_column", "doc_id")
-        rel_col = kwargs.get("relevance_column", "relevance")
+        # Resolve qrels
+        qrels = None
+        if isinstance(y_true, dict):
+            qrels = y_true
+        elif "qrels" in kwargs and isinstance(kwargs["qrels"], dict):
+            qrels = kwargs["qrels"]
+        elif isinstance(df, RetrievalDatasetBundle) and df.qrels:
+            qrels = df.qrels
+        elif isinstance(df, (pd.DataFrame, RetrievalDatasetBundle)):
+            q_df = df.queries_df if isinstance(df, RetrievalDatasetBundle) else df
+            qid_col = kwargs.get("query_id_column", getattr(df, "query_id_col", "query_id"))
+            did_col = kwargs.get("corpus_id_column", getattr(df, "doc_id_col", "doc_id"))
+            rel_col = kwargs.get("relevance_column", getattr(df, "relevance_col", "relevance"))
+            if qid_col in q_df.columns and did_col in q_df.columns:
+                qrels = {}
+                for _, row in q_df.iterrows():
+                    qid = str(row[qid_col])
+                    did = str(row[did_col])
+                    try:
+                        rel = int(float(row.get(rel_col, 1))) if rel_col in q_df.columns else 1
+                    except (ValueError, TypeError):
+                        rel = 1
+                    if qid not in qrels:
+                        qrels[qid] = {}
+                    qrels[qid][did] = rel
 
-        if qid_col in df.columns and did_col in df.columns:
-            for _, row in df.iterrows():
-                qid = str(row[qid_col])
-                did = str(row[did_col])
-                rel = int(row.get(rel_col, 1))
-                if qid not in qrels:
-                    qrels[qid] = {}
-                qrels[qid][did] = rel
+        if not qrels:
+            return {"Status": "Retrieval completed. Ground truth relevance judgments (qrels) absent."}
 
         metrics = evaluate_retrieval(qrels, ranked, k=self.top_k)
         metrics["Latency/Sample (ms)"] = round(latency_ms, 3)

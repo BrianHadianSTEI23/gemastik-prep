@@ -36,13 +36,21 @@ class RetrievalDatasetBundle:
         if self.query_text_col not in self.queries_df.columns:
             raise KeyError(f"Queries dataset is missing query_text_col '{self.query_text_col}'.")
 
-        # Build qrels if relevance column is present
+        # Validate unique document IDs in corpus
+        if self.corpus_df[self.doc_id_col].duplicated().any():
+            dups = self.corpus_df[self.doc_id_col][self.corpus_df[self.doc_id_col].duplicated()].unique()
+            raise ValueError(f"Corpus contains duplicate document IDs in '{self.doc_id_col}': {list(dups)[:5]}")
+
+        # Build qrels if relevance column is present and qrels not explicitly provided
         if self.qrels is None and self.relevance_col in self.queries_df.columns and self.doc_id_col in self.queries_df.columns:
             self.qrels = {}
             for _, row in self.queries_df.iterrows():
                 qid = str(row[self.query_id_col])
                 did = str(row[self.doc_id_col])
-                rel = int(row.get(self.relevance_col, 1))
+                try:
+                    rel = int(float(row.get(self.relevance_col, 1)))
+                except (ValueError, TypeError):
+                    raise ValueError(f"Malformed non-numeric relevance value '{row.get(self.relevance_col)}' for query '{qid}' and doc '{did}'.")
                 if qid not in self.qrels:
                     self.qrels[qid] = {}
                 self.qrels[qid][did] = rel
@@ -149,6 +157,62 @@ class DataLoader:
             df = df.iloc[:max_rows].copy()
 
         return df
+
+    @classmethod
+    def load_retrieval_bundle(
+        cls,
+        corpus_path: Union[str, Path],
+        queries_path: Union[str, Path],
+        qrels_path: Optional[Union[str, Path]] = None,
+        doc_id_col: str = "doc_id",
+        doc_text_col: str = "document",
+        query_id_col: str = "query_id",
+        query_text_col: str = "query",
+        relevance_col: str = "relevance",
+        **kwargs,
+    ) -> RetrievalDatasetBundle:
+        """
+        Loads dedicated Information Retrieval multi-dataset bundle from separate corpus, queries, and qrels files.
+        Preserves custom column names and strict schema integrity.
+        """
+        corpus_df = cls.load_data(corpus_path, **kwargs)
+        queries_df = cls.load_data(queries_path, **kwargs)
+        qrels_dict = None
+
+        if qrels_path is not None:
+            qrels_df = cls.load_data(qrels_path, **kwargs)
+            q_id_col = kwargs.get("qrels_query_id_col", query_id_col)
+            d_id_col = kwargs.get("qrels_doc_id_col", doc_id_col)
+            r_col = kwargs.get("qrels_relevance_col", relevance_col)
+
+            if q_id_col not in qrels_df.columns or d_id_col not in qrels_df.columns:
+                raise KeyError(
+                    f"Qrels file missing required columns '{q_id_col}' and/or '{d_id_col}'. "
+                    f"Found columns: {list(qrels_df.columns)}"
+                )
+
+            qrels_dict = {}
+            for _, r in qrels_df.iterrows():
+                qid = str(r[q_id_col])
+                did = str(r[d_id_col])
+                try:
+                    rel = int(float(r.get(r_col, 1))) if r_col in qrels_df.columns else 1
+                except (ValueError, TypeError):
+                    raise ValueError(f"Malformed non-numeric relevance value '{r.get(r_col)}' in qrels file.")
+                if qid not in qrels_dict:
+                    qrels_dict[qid] = {}
+                qrels_dict[qid][did] = rel
+
+        return RetrievalDatasetBundle(
+            corpus_df=corpus_df,
+            queries_df=queries_df,
+            qrels=qrels_dict,
+            doc_id_col=doc_id_col,
+            doc_text_col=doc_text_col,
+            query_id_col=query_id_col,
+            query_text_col=query_text_col,
+            relevance_col=relevance_col,
+        )
 
     @staticmethod
     def generate_synthetic_dataset(

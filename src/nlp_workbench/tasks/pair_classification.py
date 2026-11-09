@@ -78,7 +78,7 @@ class CrossEncoderPairAdapter(BaseTaskAdapter):
         self.text_a_column: str = kwargs.get("text_a_column", "text_a")
         self.text_b_column: str = kwargs.get("text_b_column", "text_b")
         self.target_column: str = kwargs.get("target_column", "label")
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.label_encoder = LabelEncoder()
         self.classes_ = np.array([])
         self.tokenizer = None
@@ -247,7 +247,7 @@ class SiamesePairAdapter(BaseTaskAdapter):
         self.text_a_column: str = kwargs.get("text_a_column", "text_a")
         self.text_b_column: str = kwargs.get("text_b_column", "text_b")
         self.target_column: str = kwargs.get("target_column", "label")
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.label_encoder = LabelEncoder()
         self.classes_ = np.array([])
         self.encoder = None
@@ -378,7 +378,7 @@ class PairTFIDFAdapter(BaseTaskAdapter):
         self.text_a_column: str = kwargs.get("text_a_column", "text_a")
         self.text_b_column: str = kwargs.get("text_b_column", "text_b")
         self.target_column: str = kwargs.get("target_column", "label")
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.label_encoder = LabelEncoder()
         self.classes_ = np.array([])
         self.pipeline = Pipeline([

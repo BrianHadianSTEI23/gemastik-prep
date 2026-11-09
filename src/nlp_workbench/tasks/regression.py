@@ -43,7 +43,7 @@ class TextRegressionAdapter(BaseTaskAdapter):
         self.random_state = random_state
         self.embedding_checkpoint = embedding_checkpoint
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.ngram_range = kwargs.get("ngram_range", (1, 2))
         self.max_features = kwargs.get("max_features", 12000)
         self.pipeline: Optional[Pipeline] = None
@@ -232,7 +232,7 @@ class TransformerRegressionAdapter(BaseTaskAdapter):
         self.max_seq_length = max_seq_length
         self.device = HardwareManager.inspect(device).get_torch_device()
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.tokenizer = None
         self.model = None
 

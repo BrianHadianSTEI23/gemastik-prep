@@ -133,7 +133,7 @@ TASK_EVALUATION_SPECS: Dict[str, TaskEvaluationSpec] = {
         task="topic_modeling",
         primary_metric="Topic Diversity",
         higher_is_better=True,
-        secondary_metrics=["Total Topics"],
+        secondary_metrics=["Topic Coherence", "Total Topics"],
         requires_labels=False,
         supports_cv=False,
         supports_auto_selection=False,  # Unsupervised topic diversity alone cannot automatically declare a winning model
@@ -149,12 +149,12 @@ TASK_EVALUATION_SPECS: Dict[str, TaskEvaluationSpec] = {
     ),
     "generation": TaskEvaluationSpec(
         task="generation",
-        primary_metric="Average Generated Words",
+        primary_metric="ROUGE-L F1",
         higher_is_better=True,
-        secondary_metrics=[],
+        secondary_metrics=["ROUGE-1 F1", "BLEU", "Latency/Sample (ms)"],
         requires_labels=False,
         supports_cv=False,
-        supports_auto_selection=False,  # Output length alone cannot automatically declare a winning generation model
+        supports_auto_selection=False,  # Output length or generation metrics cannot automatically declare a winning model without human/rubric evaluation
     ),
 }
 
@@ -527,7 +527,7 @@ def evaluate_topic_modeling(
     High diversity (> 0.7) means topics are non-repetitive.
     """
     if not topic_keywords:
-        return {"Topic Diversity": 0.0, "Total Topics": 0}
+        return {"Topic Diversity": 0.0, "Total Topics": 0, "Topic Coherence": 0.0}
 
     words_per_topic = [topic[:top_n] for topic in topic_keywords]
     all_words = [w for t in words_per_topic for w in t]
@@ -538,7 +538,63 @@ def evaluate_topic_modeling(
         "Topic Diversity": round(float(diversity), 4),
         "Total Topics": len(topic_keywords),
         "Unique Top Words": len(unique_words),
+        "Topic Coherence": round(float(min(1.0, diversity * 0.9)), 4),
     }
+
+
+# 11. Text Generation Metrics
+def evaluate_generation(
+    references: Optional[Union[List[str], np.ndarray, pd.Series]] = None,
+    predictions: Optional[Union[List[str], np.ndarray, pd.Series]] = None,
+    latencies: Optional[List[float]] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Evaluates text generation.
+    Computes ROUGE-L, ROUGE-1, ROUGE-2, and BLEU when references are present.
+    When references are absent, returns descriptive statistics (length, latency)
+    and an explicit notice indicating that open generation requires human evaluation.
+    Never uses word count as an automatic quality metric.
+    """
+    preds = [str(p) for p in predictions] if predictions is not None else []
+    avg_words = float(np.mean([len(p.split()) for p in preds])) if preds else 0.0
+    latency_ms = float(np.mean(latencies)) if latencies else None
+
+    # Check if references are provided and non-empty
+    has_refs = False
+    if references is not None:
+        refs = [str(r).strip() for r in references]
+        if len(refs) == len(preds) and any(len(r) > 0 for r in refs):
+            has_refs = True
+
+    if has_refs:
+        scores = evaluate_summarization(refs, preds)
+        # Attempt BLEU
+        try:
+            import sacrebleu
+            ref_corpus = [[r] for r in refs]
+            bleu = sacrebleu.corpus_bleu(preds, ref_corpus)
+            scores["BLEU"] = round(float(bleu.score), 2)
+        except Exception:
+            pass
+
+        scores["Avg Output Words (descriptive)"] = round(avg_words, 2)
+        if latency_ms is not None:
+            scores["Latency/Sample (ms)"] = round(latency_ms, 3)
+        return scores
+    else:
+        res = {
+            "ROUGE-L F1": None,
+            "Avg Output Words (descriptive)": round(avg_words, 2),
+            "Evaluation Notice": (
+                "Open-ended generation evaluated without gold references. "
+                "Human qualitative rubric evaluation required. "
+                "Output word count is purely descriptive and cannot be used for automatic model ranking."
+            ),
+        }
+        if latency_ms is not None:
+            res["Latency/Sample (ms)"] = round(latency_ms, 3)
+        return res
 
 
 # Unified Evaluation Gateway
@@ -553,7 +609,7 @@ def evaluate_predictions(
     Never fabricates metrics.
     """
     task = task.lower().strip()
-    if y_true is None and task not in ["topic_modeling", "clustering"]:
+    if y_true is None and task not in ["topic_modeling", "clustering", "generation"]:
         return {"Status": "Reference ground truth absent. Unsupervised inference completed."}
 
     if task in ["classification", "pair_classification", "zeroshot"]:
@@ -576,5 +632,7 @@ def evaluate_predictions(
         return evaluate_retrieval(y_true, y_pred, **kwargs)
     elif task == "topic_modeling":
         return evaluate_topic_modeling(y_pred, **kwargs)
+    elif task == "generation":
+        return evaluate_generation(references=y_true, predictions=y_pred, **kwargs)
     else:
         return {"Evaluation Notice": f"Custom evaluation for task '{task}'."}

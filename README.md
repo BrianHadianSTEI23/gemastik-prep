@@ -5,7 +5,7 @@
 [![Hardware](https://img.shields.io/badge/Hardware-NVIDIA%20RTX%203050%20(4GB%2F6GB%2F8GB)-76B900.svg)](https://www.nvidia.com/)
 [![Focus](https://img.shields.io/badge/Focus-Indonesian%20%26%20Multilingual%20NLP-orange.svg)]()
 [![Competition](https://img.shields.io/badge/Competition-Gemastik%20Data%20Mining%20Ready-green.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-99%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-118%20passed%20(100%25)-brightgreen.svg)]()
 
 A modular, hardware-aware, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`) backed by a clean Python package (`nlp_workbench`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA GeForce RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
 
@@ -106,26 +106,26 @@ The workbench decouples reusable engineering logic into the `nlp_workbench` pack
 
 ---
 
-## 3. Architecture Registry: 14 Categories × 3 Usable Approaches (42 Models)
+## 3. Architecture Registry & Capability Matrix: 14 Categories × 3 Usable Approaches (42 Models)
 
-Every registered architecture is connected to a genuine callable adapter with lazy loading:
+Every registered architecture is connected to a genuine callable adapter with lazy loading, clear operational boundaries, and defensible evaluation objectives:
 
-| Category | Approach 1 | Approach 2 | Approach 3 | Primary Metrics |
-| :--- | :--- | :--- | :--- | :--- |
-| **A. Classical ML** | `classical_nb` (Complement / Multinomial Naive Bayes) | `classical_logistic` (Logistic Regression L2 / Balanced) | `classical_linear_svm` (Linear Support Vector Machine) | Accuracy, Balanced Acc, Macro-F1 |
-| **B. Transformer Classification** | `transformer_bert` (BERT / IndoBERT) | `transformer_roberta` (RoBERTa / Indo-RoBERTa) | `transformer_distilbert` (DistilBERT Sequence Classifier) | Macro-F1, Weighted-F1, Accuracy |
-| **C. Zero-Shot Classification** | `zeroshot_bart` (BART-MNLI) | `zeroshot_deberta` (DeBERTa-v3 MNLI) | `zeroshot_xlm_r` (XLM-RoBERTa XNLI Multilingual) | Macro-F1, Accuracy |
-| **D. Multilabel Classification** | `multilabel_binary_relevance` (Binary Relevance) | `multilabel_classifier_chains` (Classifier Chains) | `multilabel_transformer` (Transformer BCEWithLogits + Threshold Tuning) | Micro-F1, Macro-F1, Hamming Loss |
-| **E. Text Regression** | `regression_tfidf_ridge` (TF-IDF + Ridge) | `regression_sentence_embeddings` (MiniLM + SVR / Ridge) | `regression_transformer` (Transformer Sequence Regression) | MAE, MSE, RMSE, $R^2$ |
-| **F. Token Classification (NER)** | `ner_bert` (BERT Token Classification / Fine-tuning) | `ner_roberta` (RoBERTa Token Classification / Fine-tuning) | `ner_multilingual_bert` (Multilingual BERT NER / Fine-tuning) | Entity-level Precision, Recall, F1 (`seqeval`) |
-| **G. Question Answering** | `qa_bert` (BERT Extractive SQuAD2) | `qa_roberta` (RoBERTa Extractive SQuAD2) | `qa_xlm_r` (XLM-RoBERTa Multilingual QA) | Exact Match (EM), Token-level F1 (Multiset) |
-| **H. Text Summarization** | `summarization_bart` (DistilBART) | `summarization_pegasus` (Pegasus XSum) | `summarization_t5` (FLAN-T5 Small) | ROUGE-1, ROUGE-2, ROUGE-L |
-| **I. Machine Translation** | `translation_marian` (MarianMT id-en) | `translation_mt5` (mT5 Multilingual Prompt) | `translation_nllb` (NLLB-200 Distilled FLORES) | SacreBLEU, chrF |
-| **J. Text Generation / Instruct** | `generation_qwen` (Qwen2.5 0.5B Instruct) | `generation_tinyllama` (TinyLlama 1.1B Chat) | `generation_gpt` (DistilGPT-2 Causal LM) | Perplexity, Output Completeness |
-| **K. Semantic Embeddings** | `embedding_minilm` (all-MiniLM-L6-v2) | `embedding_mpnet` (all-mpnet-base-v2) | `embedding_multilingual_e5` (multilingual-e5-small) | Spearman $\rho$, Pearson Correlation |
-| **L. Information Retrieval** | `ir_bm25` (Okapi BM25) | `ir_dense_biencoder` (Dense Bi-Encoder Dot Product) | `ir_hybrid_rerank` (Hybrid Retrieval + Cross-Encoder Reranking) | Recall@K, Precision@K, MRR, NDCG@K |
-| **M. Topic Modeling** | `topic_lda` (Latent Dirichlet Allocation) | `topic_nmf` (Non-Negative Matrix Factorization) | `topic_ctfidf` (Multilingual Embedding Clustering + c-TF-IDF) | Topic Diversity, Topic Keywords |
-| **N. Text Pair Classification** | `pair_cross_encoder` (Cross-Encoder Joint Matching) | `pair_siamese` (Siamese Bi-Encoder Feature Interaction) | `pair_transformer_clf` (Joint Sequence `[SEP]` Classifier) | Accuracy, Macro-F1, ROC-AUC |
+| Task Family | Category | Approach 1 | Approach 2 | Approach 3 | Primary Metric | CV? | Auto Win? | Hardware Tier | Honest Operational Boundaries |
+| :--- | :--- | :--- | :--- | :--- | :--- | :---: | :---: | :--- | :--- |
+| **Classification** | A. Classical ML | `classical_nb` | `classical_logistic` | `classical_linear_svm` | Macro-F1 | Yes | Yes | CPU (<1GB) | Fast, leak-free TF-IDF inside cross-validation pipeline. |
+| **Classification** | B. Transformer | `transformer_bert` | `transformer_roberta` | `transformer_distilbert` | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Supervised fine-tuning; refits on train+val before test evaluation. |
+| **Zero-Shot** | C. Zero-Shot | `zeroshot_bart` | `zeroshot_deberta` | `zeroshot_xlm_r` | Macro-F1 | No | Yes | RTX 3050 (bs=4-8, fp16) | Inference-only NLI entailment on candidate label hypotheses. |
+| **Multilabel** | D. Multilabel | `multilabel_binary_relevance` | `multilabel_classifier_chains` | `multilabel_transformer` | Micro-F1 | Yes | Yes | CPU / RTX 3050 | Binary Cross Entropy with threshold tuning across multiple active labels. |
+| **Regression** | E. Regression | `regression_tfidf_ridge` | `regression_sentence_embeddings` | `regression_transformer` | MAE (lower better) | Yes | Yes | CPU / RTX 3050 | Continuous value prediction; minimizes absolute error without target string coercion. |
+| **Token Tagging** | F. NER | `ner_bert` | `ner_roberta` | `ner_multilingual_bert` | Entity F1 (`seqeval`) | Yes | Yes | RTX 3050 (bs=4-8, fp16) | Strict entity-level boundaries (PER, ORG, LOC, MISC); token classification. |
+| **QA** | G. Question Answering | `qa_bert` | `qa_roberta` | `qa_xlm_r` | Exact Match (EM) | No | Yes | RTX 3050 (bs=4, fp16) | Extractive answer span selection on passage contexts. |
+| **Summarization** | H. Summarization | `summarization_bart` | `summarization_pegasus` | `summarization_t5` | ROUGE-L F1 | No | Yes | RTX 3050 (bs=2-4, fp16) | T5 models automatically prepend `summarize:` task prefix; evaluated on references. |
+| **Translation** | I. Translation | `translation_marian` | `translation_mt5` | `translation_nllb` | SacreBLEU | No | Yes | RTX 3050 (bs=2-4, fp16) | MarianMT & NLLB provide out-of-the-box translation; mT5 is a base model requiring fine-tuning. |
+| **Generation** | J. Generation | `generation_qwen` | `generation_tinyllama` | `generation_gpt` | ROUGE-L (with refs) | No | **No** | RTX 3050 / CPU | Auto-selection prohibited without custom metric; word count cannot declare a winner; requires human rubric. |
+| **Similarity** | K. Similarity | `embedding_minilm` | `embedding_mpnet` | `embedding_multilingual_e5` | Spearman $\rho$ | No | Yes | RTX 3050 (bs=16-32, fp16) | Dense contextual cosine embeddings ranked against gold human similarity scores. |
+| **Retrieval** | L. Retrieval | `ir_bm25` | `ir_dense_biencoder` | `ir_hybrid_rerank` | NDCG@5 | No | Yes | CPU / RTX 3050 | 3 independent files (corpus, queries, qrels); query-level split; deduplicated query encoding. |
+| **Topic Modeling** | M. Topic Modeling | `topic_lda` | `topic_nmf` | `topic_ctfidf` | Topic Diversity | No | **No** | CPU / RTX 3050 | Unsupervised; topic diversity alone cannot determine winner; auto-selection prohibited without manual rubric. |
+| **Pair Matching** | N. Text Pairs | `pair_cross_encoder` | `pair_siamese` | `pair_transformer_clf` | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Distinct text_a and text_b; cross-encoder requires supervised fine-tuning on user classes. |
 
 ---
 
@@ -164,17 +164,26 @@ gemastik-prep/
 │           ├── topic_modeling.py
 │           ├── pair_classification.py
 │           └── zeroshot.py
-├── tests/                        # Automated Pytest suite (99 tests)
+├── scripts/
+│   └── benchmark_hardware.py     # Hardware latency, throughput, & peak VRAM benchmark utility
+├── tests/                        # Automated Pytest suite (118 tests)
 │   ├── conftest.py
 │   ├── test_config.py
 │   ├── test_data.py
 │   ├── test_splitting.py
 │   ├── test_splitting_leakage.py
+│   ├── test_temporal_cv.py
 │   ├── test_registry.py
 │   ├── test_metrics.py
 │   ├── test_tasks.py
 │   ├── test_defaults_and_schemas.py
 │   ├── test_model_selection_validity.py
+│   ├── test_auto_selection_enforcement.py
+│   ├── test_fair_evaluation_protocol.py
+│   ├── test_retrieval_multi_dataset.py
+│   ├── test_executable_preprocessing.py
+│   ├── test_hardware_filtering.py
+│   ├── test_export_reload_equivalence.py
 │   ├── test_orchestration_lifecycle.py
 │   ├── test_inference_export.py
 │   ├── test_competition.py

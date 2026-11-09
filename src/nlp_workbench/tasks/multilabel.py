@@ -46,7 +46,7 @@ class MultilabelClassificationAdapter(BaseTaskAdapter):
         self.random_state = random_state
         self.mlb = MultiLabelBinarizer()
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.max_features = kwargs.get("max_features", 12000)
         self.ngram_range = kwargs.get("ngram_range", (1, 2))
         self.classes_ = np.array([])
@@ -265,7 +265,7 @@ class TransformerMultilabelAdapter(BaseTaskAdapter):
         self.max_seq_length = max_seq_length
         self.device = HardwareManager.inspect(device).get_torch_device()
         self.text_columns: List[str] = kwargs.get("text_columns", ["title", "content"])
-        self.cleaner = TextCleaner()
+        self.cleaner = kwargs.get("cleaner") or TextCleaner()
         self.mlb = MultiLabelBinarizer()
         self.classes_ = np.array([])
         self.tokenizer = None

@@ -59,6 +59,8 @@ class SummarizationAdapter(BaseTaskAdapter):
         self._init_pipeline()
         doc_col = self.text_columns[0] if self.text_columns[0] in df.columns else "content"
         docs = df[doc_col].astype(str).tolist()
+        if "t5" in self.checkpoint.lower():
+            docs = [f"summarize: {d}" if not d.lower().startswith("summarize:") else d for d in docs]
         summaries = self.pipeline(
             docs,
             max_length=self.max_length,

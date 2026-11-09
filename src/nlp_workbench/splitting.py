@@ -50,16 +50,46 @@ class DatasetSplitter:
         Ensures strict row preservation, zero leakage, and support for RetrievalDatasetBundle.
         """
         if isinstance(df, RetrievalDatasetBundle):
-            q_train, q_val, q_test = self.split(
-                df=df.queries_df,
-                target_col=target_col if target_col in df.queries_df.columns else None,
-                group_col=group_col,
-                time_col=time_col,
-                task="classification" if (target_col and target_col in df.queries_df.columns) else "regression",
-            )
+            # Query-level splitting to prevent query leakage across partitions
+            unique_qids = df.queries_df[df.query_id_col].unique()
+            if len(unique_qids) >= 3:
+                qid_df = pd.DataFrame({df.query_id_col: unique_qids})
+                train_qids_df, val_qids_df, test_qids_df = self.split(
+                    df=qid_df,
+                    task="regression",
+                )
+                train_set = set(train_qids_df[df.query_id_col])
+                val_set = set(val_qids_df[df.query_id_col])
+                test_set = set(test_qids_df[df.query_id_col])
+
+                q_train = df.queries_df[df.queries_df[df.query_id_col].isin(train_set)].reset_index(drop=True)
+                q_val = df.queries_df[df.queries_df[df.query_id_col].isin(val_set)].reset_index(drop=True)
+                q_test = df.queries_df[df.queries_df[df.query_id_col].isin(test_set)].reset_index(drop=True)
+            else:
+                q_train, q_val, q_test = self.split(
+                    df=df.queries_df,
+                    target_col=target_col if target_col in df.queries_df.columns else None,
+                    group_col=group_col,
+                    time_col=time_col,
+                    task="classification" if (target_col and target_col in df.queries_df.columns) else "regression",
+                )
+
+            # Partition qrels dict if present
+            qrels_train = None
+            qrels_val = None
+            qrels_test = None
+            if df.qrels:
+                tr_ids = set(q_train[df.query_id_col].astype(str))
+                vl_ids = set(q_val[df.query_id_col].astype(str))
+                ts_ids = set(q_test[df.query_id_col].astype(str))
+                qrels_train = {qid: rels for qid, rels in df.qrels.items() if qid in tr_ids}
+                qrels_val = {qid: rels for qid, rels in df.qrels.items() if qid in vl_ids}
+                qrels_test = {qid: rels for qid, rels in df.qrels.items() if qid in ts_ids}
+
             train_bundle = RetrievalDatasetBundle(
                 corpus_df=df.corpus_df.copy(),
                 queries_df=q_train,
+                qrels=qrels_train,
                 doc_id_col=df.doc_id_col,
                 doc_text_col=df.doc_text_col,
                 query_id_col=df.query_id_col,
@@ -69,6 +99,7 @@ class DatasetSplitter:
             val_bundle = RetrievalDatasetBundle(
                 corpus_df=df.corpus_df.copy(),
                 queries_df=q_val,
+                qrels=qrels_val,
                 doc_id_col=df.doc_id_col,
                 doc_text_col=df.doc_text_col,
                 query_id_col=df.query_id_col,
@@ -78,6 +109,7 @@ class DatasetSplitter:
             test_bundle = RetrievalDatasetBundle(
                 corpus_df=df.corpus_df.copy(),
                 queries_df=q_test,
+                qrels=qrels_test,
                 doc_id_col=df.doc_id_col,
                 doc_text_col=df.doc_text_col,
                 query_id_col=df.query_id_col,
@@ -119,6 +151,7 @@ class DatasetSplitter:
         df: pd.DataFrame,
         target_col: Optional[str] = None,
         group_col: Optional[str] = None,
+        time_col: Optional[str] = None,
     ) -> Iterable[Tuple[np.ndarray, np.ndarray]]:
         """Yields train and validation indices for each cross-validation fold."""
         splitter = self.get_cv_splitter(
@@ -126,16 +159,30 @@ class DatasetSplitter:
             n_splits=self.n_splits,
             random_state=self.random_state,
             group_column=group_col,
+            time_column=time_col,
+            strategy=self.strategy,
         )
+        if self.strategy == "time" or time_col:
+            # Chronological expanding window without shuffling
+            if time_col and time_col in df.columns:
+                sorted_df = df.sort_values(by=time_col).reset_index()
+                orig_indices = sorted_df["index"].values
+                for train_idx, val_idx in splitter.split(sorted_df):
+                    yield orig_indices[train_idx], orig_indices[val_idx]
+            else:
+                for train_idx, val_idx in splitter.split(df):
+                    yield train_idx, val_idx
+            return
+
         y = df[target_col].values if (target_col and target_col in df.columns) else None
         groups = df[group_col].values if (group_col and group_col in df.columns) else None
 
         if group_col and groups is not None:
-            return splitter.split(df, y, groups=groups)
+            yield from splitter.split(df, y, groups=groups)
         elif self.strategy == "stratified" and y is not None:
-            return splitter.split(df, y)
+            yield from splitter.split(df, y)
         else:
-            return splitter.split(df)
+            yield from splitter.split(df)
 
     @staticmethod
     def split_train_test(
@@ -204,9 +251,15 @@ class DatasetSplitter:
         n_splits: int = 5,
         random_state: int = 42,
         group_column: Optional[str] = None,
+        time_column: Optional[str] = None,
+        strategy: Optional[str] = None,
     ):
         """Returns the appropriate scikit-learn cross-validation splitter."""
-        if group_column:
+        strat = (strategy or "").lower().strip()
+        if strat == "time" or time_column:
+            from sklearn.model_selection import TimeSeriesSplit
+            return TimeSeriesSplit(n_splits=n_splits)
+        if group_column or strat == "group":
             return GroupKFold(n_splits=n_splits)
         if task == "classification":
             return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
