@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and test outputs
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# Model artifacts and checkpoints
+output_model/
+checkpoints/
+*.joblib
+*.pt
+*.pth
+*.bin
+*.safetensors
+.cache/
+wandb/
+mlruns/
+
+# Data and competition outputs
+*.parquet
+submission.csv
+data/
+*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Egg-info
+*.egg-info/
+.eggs/
+build/
+dist/

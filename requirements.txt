@@ -1,5 +1,5 @@
 # NLP Experimentation Workbench - Dependencies
-# Tested with Python 3.10 - 3.13 on NVIDIA RTX 3050 (Ampere) & CPU-only environments
+# For exact tested dependency versions, refer to constraints.txt
 
 # --- Core Data Science & Classical ML ---
 numpy>=1.24.0
@@ -7,23 +7,33 @@ scipy>=1.10.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 joblib>=1.3.0
-
-# --- Visualization ---
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
+# --- Storage & Data Formats ---
+pyarrow>=12.0.0       # Required for Parquet dataset ingestion
+
 # --- Deep Learning & Transformers (CUDA / CPU) ---
-# Note: For CUDA-enabled PyTorch, install according to https://pytorch.org/get-started/locally/
+# Note: For CUDA support, install torch matching your CUDA toolkit:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 torch>=2.0.0
 transformers>=4.36.0
 sentence-transformers>=2.3.0
 datasets>=2.16.0
 accelerate>=0.25.0
 
-# --- Specialized NLP Evaluation & Retrieval ---
-seqeval>=1.2.2          # Entity-level NER evaluation (Precision, Recall, F1 with BIO tags)
-evaluate>=0.4.0         # Unified HuggingFace metric evaluation
-rouge-score>=0.1.2      # Text summarization metrics (ROUGE-1, ROUGE-2, ROUGE-L)
-sacrebleu>=2.4.0        # Machine translation metrics (BLEU, chrF)
-rank-bm25>=0.2.2        # Lexical Information Retrieval (Okapi BM25)
-optuna>=3.5.0           # Hyperparameter optimization framework
+# --- Retrieval & Topic Modeling ---
+rank-bm25>=0.2.2      # Okapi BM25 lexical ranking
+
+# --- Specialized NLP Task Evaluation ---
+seqeval>=1.2.2        # Entity-level NER evaluation (Precision, Recall, F1 with BIO tags)
+evaluate>=0.4.0       # HuggingFace metric evaluation
+rouge-score>=0.1.2    # Text summarization metrics (ROUGE-1, ROUGE-2, ROUGE-L)
+sacrebleu>=2.4.0      # Machine translation metrics (BLEU, chrF)
+
+# --- Hyperparameter Optimization ---
+optuna>=3.5.0         # Bayesian HPO framework
+
+# --- Development & Testing ---
+pytest>=7.4.0
+pytest-cov>=4.1.0

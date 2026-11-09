@@ -1,0 +1,21 @@
+# Verified and tested dependency constraints for NLP Workbench
+# Platform: Ubuntu 22.04 LTS / Linux x86_64, Python 3.10 - 3.13
+# Tested with NVIDIA RTX 3050 Laptop GPU (CUDA 12.6)
+
+accelerate==1.15.0
+datasets==5.1.0
+evaluate==0.4.6
+joblib==1.6.0
+matplotlib==3.11.2
+numpy==2.5.4
+optuna==5.0.0
+pandas==3.1.1
+pyarrow==26.0.1
+rank-bm25==0.2.2
+sacrebleu==2.6.0
+scikit-learn==1.9.1
+scipy==1.18.1
+seaborn==0.13.2
+sentence-transformers==6.2.0
+seqeval==1.2.2
+transformers==5.22.2

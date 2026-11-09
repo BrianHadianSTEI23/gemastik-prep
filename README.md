@@ -5,72 +5,70 @@
 [![Hardware](https://img.shields.io/badge/Hardware-NVIDIA%20RTX%203050%20(4GB%2F6GB%2F8GB)-76B900.svg)](https://www.nvidia.com/)
 [![Focus](https://img.shields.io/badge/Focus-Indonesian%20%26%20Multilingual%20NLP-orange.svg)]()
 [![Competition](https://img.shields.io/badge/Competition-Gemastik%20Data%20Mining%20Ready-green.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-39%20passed%20(100%25)-brightgreen.svg)]()
 
-A modular, end-to-end, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
+A modular, hardware-aware, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`) backed by a clean Python package (`nlp_workbench`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA GeForce RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
 
 ---
 
 ## 1. System Architecture & Workflow Pipeline
 
-The workbench follows a strict, non-destructive, and leak-free machine learning lifecycle:
+The workbench decouples reusable engineering logic into the `nlp_workbench` package while providing a user-friendly, sequential Jupyter Notebook interface:
 
 ```
-[01. Configuration]
+[01. Configuration (WorkbenchConfig)]
        │
        ▼
-[02. Hardware Diagnostics (RTX 3050 / CPU Detection & VRAM Profiling)]
+[02. Hardware Diagnostics (HardwareManager: RTX 3050 / CPU Detection & VRAM Profiling)]
        │
        ▼
-[03. Data Ingestion (CSV / Parquet / JSONL / Synthetic Fallback)]
+[03. Data Ingestion (DataLoader: CSV / TSV / Parquet / JSONL / Synthetic Benchmarks)]
        │
        ▼
 [04. Dataset Profiling & Data Quality Audit (Missing, Cardinality, Text Length, IDs)]
        │
        ▼
-[05. Actionable EDA & Decision Support Board (Problems → Suggestions → Accepted Actions)]
+[05. Actionable EDA & 5-Point Explainable Decision Support (DataQualityAuditor)]
        │
        ▼
-[06. Task Identification & Target Schema Validation]
+[06. Task Identification & Target Schema Validation (validate_dataset_schema)]
        │
        ▼
-[07. Non-Destructive Cleaning (HTML, URLs, Whitespace, Unicode Normalization)]
+[07. Non-Destructive Cleaning (TextCleaner: Negation Preservation, HTML, URLs)]
        │
        ▼
-[08. Leakage-Safe Splitting (Stratified / Group / Time / K-Fold + Leakage Audit)]
+[08. Leakage-Safe Splitting (DatasetSplitter: Stratified / Group / Time / K-Fold + LeakageAuditor)]
        │
        ▼
-[09. Preprocessing Recommendation System (Rule-based TF-IDF vs Transformer tokenizers)]
+[09. Preprocessing Recommendation System (recommend_preprocessing)]
        │
        ▼
-[10. Architecture Registry (14 Categories × 3 Usable Approaches = 42 Models)]
+[10. Architecture Registry (ArchitectureRegistry: 14 Categories × 3 Usable Approaches = 42 Models)]
        │
-       ├──► [11. Classical Machine Learning Experiments (NB, Logistic, SVM, Ridge)]
-       ├──► [12. Transformer Fine-Tuning (BERT, RoBERTa, DistilBERT with FP16 & GradAccum)]
+       ├──► [11. Classical Machine Learning Experiments (Fold-Local Preprocessing)]
+       ├──► [12. Transformer Fine-Tuning (FP16 Mixed Precision & Dynamic Padding)]
        └──► [13. Specialized NLP Tasks (Zero-Shot, Multilabel, NER, QA, Summary, Translation, IR, Topics)]
        │
        ▼
-[14. Hyperparameter Optimization (Optuna Study)]
+[14. Cross-Validation & Model Selection (select_best_model strictly on CV scores)]
        │
        ▼
-[15. Unified Model Comparison Leaderboard (Val/Test Metric, Latency, VRAM Footprint)]
+[15. Unified Leaderboard Comparison & Held-Out Test Evaluation (Evaluated Strictly Once)]
        │
        ▼
-[16. Error Analysis & Interpretability (Confusion Matrix, Residuals, Top Misclassifications)]
+[16. Error Analysis & Diagnostics (Confusion Matrix, Misclassified Analysis)]
        │
        ▼
-[17. Final Model Selection & Best Checkpoint Pick]
+[17. Model Packaging & Export (ModelExporter: Self-Contained Artifact Bundle)]
        │
        ▼
-[18. Model Export & Packaging (.joblib pipeline & HuggingFace weights)]
+[18. Production Inference (`predict_new()` API on Raw Texts)]
        │
        ▼
-[19. Production Inference on New Raw Text (`predict_new()` API)]
+[19. Gemastik Data Mining Competition Mode (GemastikRunner: Test Ingestion & Strict submission.csv Export)]
        │
        ▼
-[20. Gemastik Data Mining Competition Mode (OOF Ensembling & Strict Submission CSV Export)]
-       │
-       ▼
-[21. Experiment Summary & Reproducibility Audit (Seeds, Hashes, Environment Snapshot)]
+[20. Experiment Summary & Reproducibility Audit (experiment_audit.json with Hashes & Environment)]
 ```
 
 ---
@@ -78,125 +76,164 @@ The workbench follows a strict, non-destructive, and leak-free machine learning 
 ## 2. Core Highlights
 
 1. **Hardware-Intelligent for RTX 3050 (4GB VRAM) & CPU-Only Systems**:
-   - Detects exact available VRAM and compute capability (e.g., Ampere SM 8.6).
+   - Detects exact available VRAM and compute capability (Ampere SM 8.6).
    - Recommends memory-safe batch sizes (e.g., batch size 8 with 4 gradient accumulation steps for base transformers in 4GB VRAM).
    - Dynamic padding to avoid wasting memory on padding tokens.
-   - Mixed precision training (`torch.cuda.amp.autocast(dtype=torch.float16)`).
+   - Mixed precision training (`torch.amp.autocast('cuda')`).
    - OOM recovery utilities (`HardwareManager.clear_cuda_cache()`) and seamless CPU fallback.
 
 2. **No Silent Destructive Preprocessing**:
-   - Explicit 3-tier decision board: **Detected Findings** $\rightarrow$ **Suggested Recommendations** $\rightarrow$ **User-Accepted Actions**.
+   - Explicit 5-point explainable decision support: **Issue $\rightarrow$ Evidence $\rightarrow$ Why It Matters $\rightarrow$ Recommendation $\rightarrow$ Drawbacks & Controlling Config Variable**.
    - Preserves negations (*"tidak", "bukan", "jangan", "tanpa", "belum"*) for sentiment classification.
    - Preserves casing and punctuation for transformer subword tokenizers.
    - Prevents stopword removal or stemming when fine-tuning pretrained language models.
 
-3. **Strict Data Leakage Prevention**:
-   - Investigates duplicate texts across train, validation, and test partitions.
+3. **Strict Experimental Methodology & Zero Leakage**:
+   - Investigates duplicate texts across train, validation, and test partitions (`LeakageAuditor`).
    - Checks ID overlap and target alignment.
-   - Enforces the hard rule: **All encoders, TF-IDF vectorizers, and scalers are fitted exclusively on the training split**.
+   - Enforces the hard rule: **All encoders, TF-IDF vectorizers, and scalers are fitted exclusively within each cross-validation fold**.
+   - Model selection is performed strictly using validation / cross-validation scores. The held-out test partition is evaluated **exactly once**.
 
 4. **Indonesian & Multilingual NLP**:
-   - First-class support for Indonesian datasets (e.g., IndoBERT, Indo-RoBERTa, Multilingual E5, XLM-RoBERTa).
+   - First-class support for Indonesian datasets (IndoBERT, Indo-RoBERTa, Multilingual E5, XLM-RoBERTa, MarianMT id-en).
    - Indonesian-aware text normalization and negation preservation.
 
 5. **Gemastik Data Mining Competition Mode**:
-   - Dedicated workflow flag (`GEMASTIK_MODE = True`).
-   - Handles unlabelled competition test files (`COMPETITION_TEST_PATH`).
+   - Dedicated runner (`GemastikRunner`).
+   - Handles unlabelled competition test files with row count and ID ordering verification.
    - Out-of-fold cross-validation ensembling.
-   - Export to `submission.csv` with strict verification of row count, ordering, and ID alignment.
+   - Export to `submission.csv` with strict verification: no row drops, no nulls, and guaranteed ID alignment.
 
 ---
 
-## 3. Architecture Registry: 14 Categories × 3 Approaches (42 Models)
+## 3. Architecture Registry: 14 Categories × 3 Usable Approaches (42 Models)
+
+Every registered architecture is connected to a genuine callable adapter with lazy loading:
 
 | Category | Approach 1 | Approach 2 | Approach 3 | Primary Metrics |
 | :--- | :--- | :--- | :--- | :--- |
-| **A. Classical ML** | Multinomial / Complement Naive Bayes | Logistic Regression (L2 / Balanced) | Linear SVM (`LinearSVC`) | Accuracy, Macro-F1, ROC-AUC |
-| **B. Transformer Classification** | BERT (`bert-base-uncased` / `indobert-base-p1`) | RoBERTa (`roberta-base` / `indonesian-roberta-base`) | DistilBERT (`distilbert-base-uncased`) | Macro-F1, Weighted-F1, Accuracy |
-| **C. Zero-Shot Classification** | BART-MNLI (`facebook/bart-large-mnli`) | DeBERTa-v3 (`MoritzLaurer/DeBERTa-v3-xsmall-mnli`) | XLM-RoBERTa XNLI (`vicgalle/xlm-roberta-base-xnli`) | Zero-shot Macro-F1, Accuracy |
-| **D. Multilabel Classification** | Binary Relevance (`MultiOutputClassifier`) | Classifier Chains (`ClassifierChain`) | Transformer Multilabel (`BCEWithLogitsLoss`) | Micro-F1, Macro-F1, Hamming Loss |
-| **E. Text Regression** | TF-IDF + Ridge Regression | Sentence Embeddings + SVR / Ridge | Transformer Sequence Regression (`MSELoss`) | MAE, MSE, RMSE, $R^2$ |
-| **F. Token Classification (NER)** | BERT Token Classification (`AutoModelForTokenClassification`) | RoBERTa Token Classification | Multilingual BERT / IndoBERT NER | Entity-level Precision, Recall, F1 (`seqeval`) |
-| **G. Question Answering** | BERT Extractive QA (`AutoModelForQuestionAnswering`) | RoBERTa Extractive QA (`roberta-base-squad2`) | XLM-R Multilingual QA (`xlm-roberta-base-squad2`) | Exact Match (EM), Token-level F1 |
-| **H. Text Summarization** | BART (`sshleifer/distilbart-cnn-12-6`) | Pegasus (`google/pegasus-xsum`) | T5 / FLAN-T5 (`t5-small` / `flan-t5-small`) | ROUGE-1, ROUGE-2, ROUGE-L |
-| **I. Machine Translation** | MarianMT (`Helsinki-NLP/opus-mt-id-en`) | mT5 (`google/mt5-small`) | NLLB (`facebook/nllb-200-distilled-600M`) | SacreBLEU, chrF |
-| **J. Text Generation / Instruct** | Qwen2.5 (`Qwen/Qwen2.5-0.5B-Instruct`) | TinyLlama (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`) | GPT-style Causal LM (`distilgpt2` / `gpt2`) | Perplexity, Repetition Penalty |
-| **K. Semantic Embeddings** | Sentence-BERT (`all-MiniLM-L6-v2`) | MPNet (`all-mpnet-base-v2`) | Multilingual E5 (`multilingual-e5-small`) | Cosine Similarity, Spearman $\rho$ |
-| **L. Information Retrieval** | Okapi BM25 (`rank-bm25`) | Dense Bi-Encoder Retrieval (Dot Product) | Hybrid Retrieval + Cross-Encoder Reranker | Recall@K, Precision@K, MRR, NDCG |
-| **M. Topic Modeling** | Latent Dirichlet Allocation (LDA) | Non-Negative Matrix Factorization (NMF) | BERTopic-Style Embedding Clustering + c-TF-IDF | Topic Coherence, Topic Diversity |
-| **N. Text Pair Classification** | Cross-Encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) | Siamese Network Bi-Encoder with Distance Metric | Transformer Pair Classification (`[SEP]` delimiter) | Accuracy, Macro-F1, ROC-AUC |
+| **A. Classical ML** | `classical_nb` (Complement / Multinomial Naive Bayes) | `classical_logistic` (Logistic Regression L2 / Balanced) | `classical_linear_svm` (Linear Support Vector Machine) | Accuracy, Balanced Acc, Macro-F1 |
+| **B. Transformer Classification** | `transformer_bert` (BERT / IndoBERT) | `transformer_roberta` (RoBERTa / Indo-RoBERTa) | `transformer_distilbert` (DistilBERT Sequence Classifier) | Macro-F1, Weighted-F1, Accuracy |
+| **C. Zero-Shot Classification** | `zeroshot_bart` (BART-MNLI) | `zeroshot_deberta` (DeBERTa-v3 MNLI) | `zeroshot_xlm_r` (XLM-RoBERTa XNLI Multilingual) | Macro-F1, Accuracy |
+| **D. Multilabel Classification** | `multilabel_binary_relevance` (Binary Relevance) | `multilabel_classifier_chains` (Classifier Chains) | `multilabel_transformer` (Sigmoid BCEWithLogits) | Micro-F1, Macro-F1, Hamming Loss |
+| **E. Text Regression** | `regression_tfidf_ridge` (TF-IDF + Ridge) | `regression_sentence_embeddings` (MiniLM + SVR / Ridge) | `regression_transformer` (Transformer Sequence Regression) | MAE, MSE, RMSE, $R^2$ |
+| **F. Token Classification (NER)** | `ner_bert` (BERT Token Classification) | `ner_roberta` (RoBERTa Token Classification) | `ner_multilingual_bert` (Multilingual BERT NER) | Entity-level Precision, Recall, F1 (`seqeval`) |
+| **G. Question Answering** | `qa_bert` (BERT Extractive QA) | `qa_roberta` (RoBERTa Extractive QA) | `qa_xlm_r` (XLM-RoBERTa Multilingual QA) | Exact Match (EM), Token-level F1 |
+| **H. Text Summarization** | `summarization_bart` (DistilBART) | `summarization_pegasus` (Pegasus XSum) | `summarization_t5` (FLAN-T5 Small) | ROUGE-1, ROUGE-2, ROUGE-L |
+| **I. Machine Translation** | `translation_marian` (MarianMT id-en) | `translation_mt5` (mT5 Multilingual) | `translation_nllb` (NLLB-200 Distilled) | SacreBLEU, chrF |
+| **J. Text Generation / Instruct** | `generation_qwen` (Qwen2.5 0.5B Instruct) | `generation_tinyllama` (TinyLlama 1.1B Chat) | `generation_gpt` (DistilGPT-2 Causal LM) | Perplexity, Output Completeness |
+| **K. Semantic Embeddings** | `embedding_minilm` (all-MiniLM-L6-v2) | `embedding_mpnet` (all-mpnet-base-v2) | `embedding_multilingual_e5` (multilingual-e5-small) | Spearman $\rho$, Pearson Correlation |
+| **L. Information Retrieval** | `ir_bm25` (Okapi BM25) | `ir_dense_biencoder` (Dense Bi-Encoder Dot Product) | `ir_hybrid_rerank` (Hybrid BM25 + Dense Reranking) | Recall@K, Precision@K, MRR, NDCG@K |
+| **M. Topic Modeling** | `topic_lda` (Latent Dirichlet Allocation) | `topic_nmf` (Non-Negative Matrix Factorization) | `topic_ctfidf` (Embedding Clustering + c-TF-IDF) | Topic Diversity, Topic Keywords |
+| **N. Text Pair Classification** | `pair_cross_encoder` (Cross-Encoder MS-MARCO) | `pair_siamese` (Siamese Bi-Encoder Distance Metric) | `pair_transformer_clf` (Joint Sequence `[SEP]` Classifier) | Accuracy, Macro-F1, ROC-AUC |
 
 ---
 
-## 4. Setup and Installation
+## 4. Repository Structure
 
-### Option A: Using the Configured Virtual Environment (Recommended on this workstation)
-This machine is configured with a dedicated Python environment containing PyTorch (with CUDA 12.6 support for the RTX 3050):
+```
+gemastik-prep/
+├── src/
+│   └── nlp_workbench/
+│       ├── __init__.py           # Package entry point
+│       ├── config.py             # WorkbenchConfig with validation & defaults
+│       ├── hardware.py           # HardwareManager (RTX 3050 VRAM profiling)
+│       ├── data.py               # DataLoader & task synthetic generators
+│       ├── eda.py                # DataQualityAuditor & 5-point decision support
+│       ├── preprocessing.py      # TextCleaner (negations preserved) & recommender
+│       ├── splitting.py          # DatasetSplitter & LeakageAuditor
+│       ├── evaluation.py         # Standard metrics for all 14 task categories
+│       ├── registry.py           # ArchitectureRegistry (42 real model records)
+│       ├── training.py           # run_cross_validation & select_best_model
+│       ├── export.py             # ModelExporter & LoadedModelBundle
+│       ├── inference.py          # predict_new production API
+│       ├── competition.py        # GemastikRunner for competition submissions
+│       └── tasks/                # Real callable task adapters
+│           ├── base.py
+│           ├── classification.py
+│           ├── regression.py
+│           ├── multilabel.py
+│           ├── ner.py
+│           ├── qa.py
+│           ├── summarization.py
+│           ├── translation.py
+│           ├── generation.py
+│           ├── similarity.py
+│           ├── retrieval.py
+│           ├── topic_modeling.py
+│           ├── pair_classification.py
+│           └── zeroshot.py
+├── tests/                        # Automated Pytest suite (39 tests)
+│   ├── conftest.py
+│   ├── test_config.py
+│   ├── test_data.py
+│   ├── test_splitting.py
+│   ├── test_registry.py
+│   ├── test_metrics.py
+│   ├── test_tasks.py
+│   ├── test_inference_export.py
+│   ├── test_competition.py
+│   └── test_training_eda.py
+├── .github/
+│   └── workflows/
+│       └── tests.yml             # GitHub Actions CI workflow
+├── nlp_workbench.ipynb           # User-facing experimentation notebook
+├── pyproject.toml                # Package configuration & pytest markers
+├── requirements.txt              # Grouped project dependencies
+├── constraints.txt               # Pinned exact verified dependency versions
+└── README.md
+```
 
+---
+
+## 5. Setup and Quickstart
+
+### Option A: Using the Configured Workstation Environment
 ```bash
 # Path to environment:
 /home/hadynata/vs-code-data/hdl/project-haphaestus/.venv/bin/python
-```
 
-To register the kernel for Jupyter Notebook / VS Code:
-```bash
+# Register kernel for Jupyter / VS Code:
 /home/hadynata/vs-code-data/hdl/project-haphaestus/.venv/bin/python -m ipykernel install --user --name=nlp-workbench --display-name="Python (NLP Workbench RTX 3050)"
 ```
 
-### Option B: Fresh Local / Colab / Kaggle Installation
+### Option B: Local or Cloud Installation
 ```bash
-git clone https://github.com/hadynata/gemastik-prep.git
+git clone https://github.com/BrianHadianSTEI23/gemastik-prep.git
 cd gemastik-prep
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e . --no-deps
+```
+
+### Running Tests
+Execute the automated test suite:
+```bash
+pytest tests/ -v
 ```
 
 ---
 
-## 5. Configuration Quickstart (Section 01 of Notebook)
+## 6. Configuration Quickstart (Notebook Section 01)
 
-To start an experiment, simply open `nlp_workbench.ipynb` and configure the top variables in **Section 01**:
+To run an experiment, open `nlp_workbench.ipynb` and configure the control center:
 
 ```python
-# ==========================================
-# 1. CORE DATASET & TASK CONFIGURATION
-# ==========================================
-DATA_PATH = "your_dataset.csv"       # Path to CSV, Parquet, JSONL or "synthetic" for demo
-TEXT_COLUMNS = ["text"]              # Single column ["text"] or multi-column ["title", "content"]
-TARGET_COLUMN = "label"              # Name of target column (or None for unsupervised tasks)
-TASK = "classification"              # "classification", "regression", "multilabel", "ner", "retrieval", etc.
-LANGUAGE = "indonesian"              # "indonesian", "english", or "multilingual"
+from nlp_workbench import get_default_config
 
-# ==========================================
-# 2. COMPETITION SETTINGS (GEMASTIK MODE)
-# ==========================================
-GEMASTIK_MODE = False                # Set True to enable competition pipeline & submission export
-COMPETITION_TEST_PATH = "test.csv"   # Separate unlabelled test dataset
-ID_COLUMN = "id"                     # Unique ID column preserved in final submission
-
-# ==========================================
-# 3. REPRODUCIBILITY & HARDWARE
-# ==========================================
-RANDOM_STATE = 42                    # Global random seed
-DEVICE = "auto"                      # "auto" (selects CUDA if available), "cuda", or "cpu"
+config = get_default_config(task="classification", language="indonesian")
+config.dataset_path = "path/to/dataset.csv"  # or "synthetic"
+config.text_column = "text"
+config.target_column = "target"
+config.device = "auto"
+config.gemastik_mode = True
 ```
 
-Then execute cells sequentially from top to bottom.
+Execute cells sequentially from top to bottom.
 
 ---
 
-## 6. RTX 3050 Memory Optimization Tips
+## 7. License & Credits
 
-1. **Keep Batch Sizes Small**: On 4GB VRAM, set `batch_size = 8` for DistilBERT/MiniLM, and `batch_size = 4` for BERT/RoBERTa base.
-2. **Use Gradient Accumulation**: To simulate an effective batch size of 32 without memory spikes, set `gradient_accumulation_steps = 4` (with batch size 8).
-3. **Always Enable FP16**: `torch.cuda.amp.autocast(dtype=torch.float16)` halves activations memory and accelerates Tensor Core execution on Ampere GPUs.
-4. **Free Memory Between Model Runs**: The notebook includes `HardwareManager.clear_cuda_cache()` to clean up PyTorch tensors and avoid VRAM fragmentation before loading new architectures.
-
----
-
-## 7. Deliverables Summary
-
-- `nlp_workbench.ipynb`: Complete self-contained experimentation notebook.
-- `requirements.txt`: Pinned package dependencies.
-- `README.md`: System documentation, task guide, and hardware setup instructions.
+Built for Gemastik Data Mining preparation and academic NLP research. All code is distributed under the MIT License.
