@@ -30,6 +30,8 @@ class TopicModelingAdapter(BaseTaskAdapter):
         n_topics: int = 5,
         top_words_count: int = 10,
         random_state: int = 42,
+        embedding_checkpoint: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        language: str = "indonesian",
         **kwargs,
     ):
         super().__init__(model_id=model_id, **kwargs)
@@ -37,6 +39,8 @@ class TopicModelingAdapter(BaseTaskAdapter):
         self.n_topics = n_topics
         self.top_words_count = top_words_count
         self.random_state = random_state
+        self.embedding_checkpoint = embedding_checkpoint
+        self.language = language.lower()
         self.text_columns: List[str] = kwargs.get("text_columns", ["content"])
         self.cleaner = TextCleaner()
         self.vectorizer = None
@@ -68,8 +72,9 @@ class TopicModelingAdapter(BaseTaskAdapter):
         t0 = time.time()
         texts = self._prepare_text(train_df, **kwargs)
 
+        sw = "english" if self.language in ["english", "en"] else None
         if "lda" in self.approach:
-            self.vectorizer = CountVectorizer(max_features=5000, stop_words="english", min_df=1)
+            self.vectorizer = CountVectorizer(max_features=5000, stop_words=sw, min_df=1)
             X = self.vectorizer.fit_transform(texts)
             self.model = LatentDirichletAllocation(n_components=self.n_topics, random_state=self.random_state)
             self.model.fit(X)
@@ -82,7 +87,7 @@ class TopicModelingAdapter(BaseTaskAdapter):
         elif "ctfidf" in self.approach or "bertopic" in self.approach:
             # c-TF-IDF Embedding Clustering
             from sentence_transformers import SentenceTransformer
-            embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            embedder = SentenceTransformer(self.embedding_checkpoint)
             emb = embedder.encode(texts, show_progress_bar=False)
             kmeans = KMeans(n_clusters=self.n_topics, random_state=self.random_state, n_init=10)
             cluster_labels = kmeans.fit_predict(emb)
@@ -90,7 +95,7 @@ class TopicModelingAdapter(BaseTaskAdapter):
 
             # Class-based TF-IDF
             docs_per_cluster = pd.DataFrame({"text": texts, "cluster": cluster_labels}).groupby("cluster")["text"].apply(" ".join)
-            c_tfidf_vec = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+            c_tfidf_vec = TfidfVectorizer(ngram_range=(1, 2), min_df=1, stop_words=sw)
             c_tfidf_mat = c_tfidf_vec.fit_transform(docs_per_cluster)
             c_features = c_tfidf_vec.get_feature_names_out()
             self.topic_keywords = []
@@ -100,7 +105,7 @@ class TopicModelingAdapter(BaseTaskAdapter):
                 self.topic_keywords.append([c_features[idx] for idx in top_indices])
 
         else:  # Default to NMF
-            self.vectorizer = TfidfVectorizer(max_features=5000, sublinear_tf=True, min_df=1)
+            self.vectorizer = TfidfVectorizer(max_features=5000, sublinear_tf=True, min_df=1, stop_words=sw)
             X = self.vectorizer.fit_transform(texts)
             self.model = NMF(n_components=self.n_topics, random_state=self.random_state)
             self.model.fit(X)
@@ -132,7 +137,7 @@ class TopicModelingAdapter(BaseTaskAdapter):
             return np.argmax(doc_topics, axis=1)
         elif hasattr(self.model, "predict"):
             from sentence_transformers import SentenceTransformer
-            embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            embedder = SentenceTransformer(self.embedding_checkpoint)
             emb = embedder.encode(texts, show_progress_bar=False)
             return self.model.predict(emb)
         return np.zeros(len(df), dtype=int)
@@ -149,6 +154,8 @@ class TopicModelingAdapter(BaseTaskAdapter):
             "model_id": self.model_id,
             "approach": self.approach,
             "n_topics": self.n_topics,
+            "embedding_checkpoint": self.embedding_checkpoint,
+            "language": self.language,
             "vectorizer": self.vectorizer,
             "model": self.model,
             "topic_keywords": self.topic_keywords,
@@ -164,6 +171,8 @@ class TopicModelingAdapter(BaseTaskAdapter):
             model_id=bundle["model_id"],
             approach=bundle["approach"],
             n_topics=bundle["n_topics"],
+            embedding_checkpoint=bundle.get("embedding_checkpoint", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+            language=bundle.get("language", "indonesian"),
             text_columns=bundle["text_columns"],
         )
         adapter.vectorizer = bundle["vectorizer"]

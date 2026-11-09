@@ -110,17 +110,25 @@ class ZeroShotClassificationAdapter(BaseTaskAdapter):
         if y_true is None:
             return {"Status": "Zero-shot inference completed. Reference ground truth absent."}
 
+        # Validate that y_true labels are in candidate_labels before running prediction
+        candidate_set = set(str(c) for c in self.candidate_labels)
+        invalid_labels = set(str(y) for y in y_true) - candidate_set
+        if invalid_labels:
+            raise ValueError(
+                f"Evaluation failed: Ground truth contains labels {invalid_labels} "
+                f"that are not in candidate_labels: {self.candidate_labels}"
+            )
+
         t0 = time.time()
         preds = self.predict(df)
         latency_ms = ((time.time() - t0) / max(1, len(df))) * 1000
 
-        # Encode classes based on candidate_labels
-        class_to_idx = {c: i for i, c in enumerate(self.candidate_labels)}
-        # Map unknown labels to a fallback index if necessary
-        y_true_enc = [class_to_idx.get(str(y), 0) for y in y_true]
-        y_pred_enc = [class_to_idx.get(str(p), 0) for p in preds]
+        class_to_idx = {str(c): i for i, c in enumerate(self.candidate_labels)}
+        y_true_enc = [class_to_idx[str(y)] for y in y_true]
+        y_pred_enc = [class_to_idx[str(p)] for p in preds]
 
-        metrics = evaluate_classification(np.array(y_true_enc), np.array(y_pred_enc))
+        labels = list(range(len(self.candidate_labels)))
+        metrics = evaluate_classification(np.array(y_true_enc), np.array(y_pred_enc), labels=labels)
         metrics["Latency/Sample (ms)"] = round(latency_ms, 3)
         return metrics
 

@@ -10,6 +10,33 @@ import pandas as pd
 
 from .config import WorkbenchConfig
 
+class DatasetValidator:
+    """Class wrapper for dataset schema validation."""
+    def __init__(
+        self,
+        config: Optional[WorkbenchConfig] = None,
+        task: Optional[str] = None,
+        text_columns: Optional[List[str]] = None,
+        target_column: Optional[str] = None,
+        id_column: Optional[str] = None,
+    ):
+        self.config = config
+        self.task = task
+        self.text_columns = text_columns
+        self.target_column = target_column
+        self.id_column = id_column
+
+    def validate(self, df: pd.DataFrame, raise_on_error: bool = True) -> Tuple[bool, List[str]]:
+        return validate_dataset_schema(
+            df=df,
+            config=self.config,
+            task=self.task,
+            text_col=self.text_columns[0] if self.text_columns else None,
+            target_col=self.target_column,
+            raise_on_error=raise_on_error,
+        )
+
+
 class DataLoader:
     @classmethod
     def load(cls, path: Union[str, Path], **kwargs) -> pd.DataFrame:

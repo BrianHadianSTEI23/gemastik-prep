@@ -10,8 +10,8 @@ import pandas as pd
 from .tasks.base import BaseTaskAdapter
 from .tasks.classification import ClassicalClassificationAdapter, TransformerClassificationAdapter
 from .tasks.zeroshot import ZeroShotClassificationAdapter
-from .tasks.multilabel import MultilabelClassificationAdapter
-from .tasks.regression import TextRegressionAdapter
+from .tasks.multilabel import MultilabelClassificationAdapter, TransformerMultilabelAdapter
+from .tasks.regression import TextRegressionAdapter, TransformerRegressionAdapter
 from .tasks.ner import NERAdapter
 from .tasks.qa import QuestionAnsweringAdapter
 from .tasks.summarization import SummarizationAdapter
@@ -20,7 +20,13 @@ from .tasks.generation import GenerationAdapter
 from .tasks.similarity import SemanticSimilarityAdapter
 from .tasks.retrieval import RetrievalAdapter
 from .tasks.topic_modeling import TopicModelingAdapter
-from .tasks.pair_classification import TextPairClassificationAdapter
+from .tasks.pair_classification import (
+    TextPairClassificationAdapter,
+    CrossEncoderPairAdapter,
+    SiamesePairAdapter,
+    PairTransformerClassifierAdapter,
+    PairTFIDFAdapter,
+)
 
 @dataclass
 class ModelRecord:
@@ -329,9 +335,9 @@ class ArchitectureRegistry:
             supported_operations=["training", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["Micro-F1", "Macro-F1", "Hamming Loss"],
-            adapter_cls=MultilabelClassificationAdapter,
-            adapter_kwargs={"approach": "binary_relevance"},
-            notes="Uses Binary Cross Entropy and threshold tuning."
+            adapter_cls=TransformerMultilabelAdapter,
+            adapter_kwargs={"checkpoint": "distilbert-base-uncased"},
+            notes="Uses Binary Cross Entropy and threshold tuning.",
         ))
 
         # E. Text Regression
@@ -348,7 +354,7 @@ class ArchitectureRegistry:
             evaluation_metrics=["MAE", "MSE", "RMSE", "R2"],
             adapter_cls=TextRegressionAdapter,
             adapter_kwargs={"approach": "tfidf_ridge"},
-            notes="L2 regularized linear model predicting continuous values."
+            notes="L2 regularized linear model predicting continuous values.",
         ))
         self.register(ModelRecord(
             model_id="regression_sentence_embeddings",
@@ -363,7 +369,7 @@ class ArchitectureRegistry:
             evaluation_metrics=["MAE", "RMSE", "R2"],
             adapter_cls=TextRegressionAdapter,
             adapter_kwargs={"approach": "svr"},
-            notes="Non-linear Support Vector Regression on dense contextual embeddings."
+            notes="Non-linear Support Vector Regression on dense contextual embeddings.",
         ))
         self.register(ModelRecord(
             model_id="regression_transformer",
@@ -376,9 +382,9 @@ class ArchitectureRegistry:
             supported_operations=["training", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["MAE", "RMSE", "R2"],
-            adapter_cls=TextRegressionAdapter,
-            adapter_kwargs={"approach": "tfidf_ridge"},
-            notes="Single continuous regression head with MSE loss."
+            adapter_cls=TransformerRegressionAdapter,
+            adapter_kwargs={"checkpoint": "distilbert-base-uncased"},
+            notes="Single continuous regression head with MSE loss.",
         ))
 
         # F. Token Classification (NER)
@@ -386,49 +392,49 @@ class ArchitectureRegistry:
             model_id="ner_bert",
             category="F. Named Entity Recognition (NER)",
             approach_name="BERT Token Classification",
-            model_framework="HuggingFace Pipeline",
+            model_framework="HuggingFace / PyTorch",
             checkpoint="dslim/bert-base-NER",
             supported_tasks=["ner"],
             supported_languages=["English"],
-            supported_operations=["inference", "evaluation"],
+            supported_operations=["training", "fine-tuning", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["Entity Precision", "Entity Recall", "Entity F1 (Seqeval)"],
             adapter_cls=NERAdapter,
             adapter_kwargs={"checkpoint": "dslim/bert-base-NER"},
-            is_inference_only=True,
-            notes="Extracts PER, ORG, LOC, MISC entities with BIO tagging."
+            is_inference_only=False,
+            notes="Extracts PER, ORG, LOC, MISC entities with BIO tagging and fine-tuning support.",
         ))
         self.register(ModelRecord(
             model_id="ner_roberta",
             category="F. Named Entity Recognition (NER)",
             approach_name="RoBERTa Token Classification",
-            model_framework="HuggingFace Pipeline",
+            model_framework="HuggingFace / PyTorch",
             checkpoint="Jean-Baptiste/roberta-large-ner",
             supported_tasks=["ner"],
             supported_languages=["English"],
-            supported_operations=["inference", "evaluation"],
+            supported_operations=["training", "fine-tuning", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=4, fp16)",
             evaluation_metrics=["Entity Precision", "Entity Recall", "Entity F1 (Seqeval)"],
             adapter_cls=NERAdapter,
             adapter_kwargs={"checkpoint": "Jean-Baptiste/roberta-large-ner"},
-            is_inference_only=True,
-            notes="Byte-pair encoded token classification."
+            is_inference_only=False,
+            notes="Byte-pair encoded token classification with fine-tuning support.",
         ))
         self.register(ModelRecord(
             model_id="ner_multilingual_bert",
             category="F. Named Entity Recognition (NER)",
             approach_name="Multilingual BERT / IndoBERT NER",
-            model_framework="HuggingFace Pipeline",
+            model_framework="HuggingFace / PyTorch",
             checkpoint="bert-base-multilingual-cased",
             supported_tasks=["ner"],
             supported_languages=["Indonesian", "Multilingual"],
-            supported_operations=["inference", "evaluation"],
+            supported_operations=["training", "fine-tuning", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["Entity Precision", "Entity Recall", "Entity F1 (Seqeval)"],
             adapter_cls=NERAdapter,
             adapter_kwargs={"checkpoint": "bert-base-multilingual-cased"},
-            is_inference_only=True,
-            notes="Multilingual WordPiece representation for Indonesian entity extraction."
+            is_inference_only=False,
+            notes="Multilingual WordPiece representation for Indonesian entity extraction with fine-tuning support.",
         ))
 
         # G. Question Answering
@@ -437,16 +443,16 @@ class ArchitectureRegistry:
             category="G. Question Answering",
             approach_name="BERT Extractive QA",
             model_framework="HuggingFace Pipeline",
-            checkpoint="bert-base-uncased",
+            checkpoint="deepset/bert-base-cased-squad2",
             supported_tasks=["qa"],
             supported_languages=["English"],
             supported_operations=["inference", "evaluation"],
             vram_tier="RTX 3050 (bs=4, fp16)",
             evaluation_metrics=["Exact Match (EM)", "Token F1"],
             adapter_cls=QuestionAnsweringAdapter,
-            adapter_kwargs={"checkpoint": "bert-base-uncased"},
+            adapter_kwargs={"checkpoint": "deepset/bert-base-cased-squad2"},
             is_inference_only=True,
-            notes="Predicts start and end answer token spans in context."
+            notes="Extractive QA model pretrained on SQuAD 2.0 with answer span extraction.",
         ))
         self.register(ModelRecord(
             model_id="qa_roberta",
@@ -717,8 +723,8 @@ class ArchitectureRegistry:
         self.register(ModelRecord(
             model_id="ir_hybrid_rerank",
             category="L. Information Retrieval",
-            approach_name="Hybrid Retrieval (BM25 + Dense)",
-            model_framework="BM25 + SentenceTransformers",
+            approach_name="Hybrid Retrieval + Cross-Encoder Reranking",
+            model_framework="BM25 + SentenceTransformers + CrossEncoder",
             checkpoint="sentence-transformers/all-MiniLM-L6-v2",
             supported_tasks=["retrieval"],
             supported_languages=["English", "Indonesian"],
@@ -726,9 +732,13 @@ class ArchitectureRegistry:
             vram_tier="RTX 3050 (bs=16, fp16)",
             evaluation_metrics=["Recall@5", "MRR", "NDCG@5"],
             adapter_cls=RetrievalAdapter,
-            adapter_kwargs={"approach": "hybrid"},
+            adapter_kwargs={
+                "approach": "hybrid",
+                "dense_checkpoint": "sentence-transformers/all-MiniLM-L6-v2",
+                "reranker_checkpoint": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            },
             is_inference_only=True,
-            notes="Combines normalized lexical BM25 and dense semantic scores."
+            notes="Combines candidate generation (BM25 + dense) with Cross-Encoder candidate reranking.",
         ))
 
         # M. Topic Modeling
@@ -745,7 +755,7 @@ class ArchitectureRegistry:
             evaluation_metrics=["Topic Diversity", "Total Topics"],
             adapter_cls=TopicModelingAdapter,
             adapter_kwargs={"approach": "lda"},
-            notes="Generative probabilistic topic modeling over count vectors."
+            notes="Generative probabilistic topic modeling over count vectors.",
         ))
         self.register(ModelRecord(
             model_id="topic_nmf",
@@ -760,22 +770,25 @@ class ArchitectureRegistry:
             evaluation_metrics=["Topic Diversity", "Total Topics"],
             adapter_cls=TopicModelingAdapter,
             adapter_kwargs={"approach": "nmf"},
-            notes="Matrix factorization decomposing TF-IDF document-term matrices."
+            notes="Matrix factorization decomposing TF-IDF document-term matrices.",
         ))
         self.register(ModelRecord(
             model_id="topic_ctfidf",
             category="M. Topic Modeling",
             approach_name="c-TF-IDF Embedding Clustering (BERTopic-style)",
             model_framework="SentenceTransformers + Scikit-Learn",
-            checkpoint="sentence-transformers/all-MiniLM-L6-v2",
+            checkpoint="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             supported_tasks=["topic_modeling"],
             supported_languages=["Indonesian", "English", "Multilingual"],
             supported_operations=["training", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=32, fp16)",
             evaluation_metrics=["Topic Diversity", "Total Topics"],
             adapter_cls=TopicModelingAdapter,
-            adapter_kwargs={"approach": "ctfidf"},
-            notes="Clusters dense sentence embeddings, then extracts topic words via class-based TF-IDF."
+            adapter_kwargs={
+                "approach": "ctfidf",
+                "embedding_checkpoint": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            },
+            notes="Clusters dense sentence embeddings, then extracts topic words via class-based TF-IDF.",
         ))
 
         # N. Text Pair Classification
@@ -783,16 +796,16 @@ class ArchitectureRegistry:
             model_id="pair_cross_encoder",
             category="N. Text Pair Classification",
             approach_name="Cross-Encoder Joint Matching",
-            model_framework="Scikit-Learn / CrossEncoder",
-            checkpoint=None,
+            model_framework="SentenceTransformers / CrossEncoder",
+            checkpoint="cross-encoder/ms-marco-MiniLM-L-6-v2",
             supported_tasks=["pair_classification"],
             supported_languages=["English", "Indonesian"],
             supported_operations=["training", "inference", "evaluation"],
-            vram_tier="CPU (<1GB)",
+            vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["Accuracy", "Macro-F1"],
-            adapter_cls=TextPairClassificationAdapter,
-            adapter_kwargs={"approach": "cross_encoder"},
-            notes="Joint representation over pair inputs."
+            adapter_cls=CrossEncoderPairAdapter,
+            adapter_kwargs={"checkpoint": "cross-encoder/ms-marco-MiniLM-L-6-v2"},
+            notes="Joint cross-encoder scoring text pairs.",
         ))
         self.register(ModelRecord(
             model_id="pair_siamese",
@@ -805,9 +818,9 @@ class ArchitectureRegistry:
             supported_operations=["training", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=32, fp16)",
             evaluation_metrics=["Accuracy", "Macro-F1"],
-            adapter_cls=TextPairClassificationAdapter,
-            adapter_kwargs={"approach": "siamese"},
-            notes="Encodes text pairs independently, classifies via difference and product vectors."
+            adapter_cls=SiamesePairAdapter,
+            adapter_kwargs={"checkpoint": "sentence-transformers/all-MiniLM-L6-v2"},
+            notes="Encodes text pairs independently, classifies via difference and product vectors [u, v, |u - v|, u * v].",
         ))
         self.register(ModelRecord(
             model_id="pair_transformer_clf",
@@ -820,9 +833,9 @@ class ArchitectureRegistry:
             supported_operations=["training", "inference", "evaluation"],
             vram_tier="RTX 3050 (bs=8, fp16)",
             evaluation_metrics=["Accuracy", "Macro-F1"],
-            adapter_cls=TextPairClassificationAdapter,
-            adapter_kwargs={"approach": "cross_encoder"},
-            notes="Joint sequence classification with [SEP] delimiter."
+            adapter_cls=PairTransformerClassifierAdapter,
+            adapter_kwargs={"checkpoint": "distilbert-base-uncased"},
+            notes="Joint sequence classification with [SEP] delimiter.",
         ))
 
 registry = ArchitectureRegistry()

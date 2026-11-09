@@ -49,8 +49,11 @@ class SemanticSimilarityAdapter(BaseTaskAdapter):
             "status": "SentenceTransformer model initialized.",
         }
 
-    def encode(self, texts: List[str], batch_size: int = 16) -> np.ndarray:
+    def encode(self, texts: List[str], batch_size: int = 16, is_query: bool = True) -> np.ndarray:
         self._init_model()
+        if "e5" in self.checkpoint.lower():
+            prefix = "query: " if is_query else "passage: "
+            texts = [t if t.startswith(("query: ", "passage: ")) else prefix + t for t in texts]
         with HardwareManager.get_autocast_context(device=self.device.type, enabled=(self.device.type == "cuda")):
             return self.model.encode(texts, batch_size=batch_size, show_progress_bar=False, device=str(self.device))
 
@@ -62,8 +65,8 @@ class SemanticSimilarityAdapter(BaseTaskAdapter):
         texts_a = df[col_a].astype(str).tolist()
         texts_b = df[col_b].astype(str).tolist()
 
-        emb_a = self.encode(texts_a)
-        emb_b = self.encode(texts_b)
+        emb_a = self.encode(texts_a, is_query=True)
+        emb_b = self.encode(texts_b, is_query=kwargs.get("is_passage", False) is False)
 
         # Dot product / cosine similarity
         norm_a = emb_a / (np.linalg.norm(emb_a, axis=1, keepdims=True) + 1e-9)

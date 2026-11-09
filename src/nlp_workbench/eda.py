@@ -18,6 +18,60 @@ class AuditReport(dict):
         return iter((self.summary_df, self.findings))
 
 
+class ExploratoryDataAnalysis:
+    """
+    Profiles text statistics: character lengths, word counts, vocabulary, and target distributions.
+    """
+    def __init__(
+        self,
+        df: Optional[pd.DataFrame] = None,
+        text_columns: Optional[List[str]] = None,
+        target_column: Optional[str] = None,
+    ):
+        self.df = df
+        self.text_columns = text_columns or []
+        self.target_column = target_column
+
+    def profile(self, df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+        data = df if df is not None else self.df
+        if data is None:
+            raise ValueError("No DataFrame provided for EDA profiling.")
+
+        cols = [c for c in self.text_columns if c in data.columns]
+        if not cols:
+            cols = [c for c in ["title", "content", "document", "text", "query", "source_text"] if c in data.columns]
+
+        stats = {}
+        for c in cols:
+            series = data[c].fillna("").astype(str)
+            char_lens = series.str.len()
+            word_counts = series.str.split().str.len()
+            stats[c] = {
+                "sample_count": len(series),
+                "char_len_mean": round(float(char_lens.mean()), 1),
+                "char_len_median": float(char_lens.median()),
+                "char_len_max": int(char_lens.max()) if len(char_lens) else 0,
+                "word_count_mean": round(float(word_counts.mean()), 1),
+                "word_count_median": float(word_counts.median()),
+                "word_count_max": int(word_counts.max()) if len(word_counts) else 0,
+            }
+
+        target_stats = {}
+        if self.target_column and self.target_column in data.columns:
+            vc = data[self.target_column].value_counts()
+            target_stats = {
+                "unique_values": int(data[self.target_column].nunique()),
+                "distribution": vc.to_dict(),
+            }
+
+        return {
+            "total_rows": len(data),
+            "columns": list(data.columns),
+            "text_stats": stats,
+            "target_stats": target_stats,
+        }
+
+
 class DataQualityAuditor:
     def __init__(
         self,

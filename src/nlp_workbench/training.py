@@ -13,6 +13,7 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from .tasks.base import BaseTaskAdapter
 from .splitting import DatasetSplitter
 from .registry import registry
+from .evaluation import is_higher_better
 
 
 class BestModelSelection(str):
@@ -67,8 +68,19 @@ def run_cross_validation(
         base_model_id = "custom_adapter"
     else:
         base_model_id = effective_adapter.model_id
-        # Define factory that recreates adapter with same kwargs
-        factory = lambda: registry.create_adapter(effective_adapter.model_id)
+        # Extract attributes from effective_adapter to preserve constructor kwargs across folds
+        adapter_kwargs = {}
+        for attr in [
+            "approach", "checkpoint", "dense_checkpoint", "reranker_checkpoint",
+            "source_lang", "target_lang", "model_type", "n_topics", "random_state",
+            "text_columns", "target_column", "context_column", "question_column",
+            "answer_column", "text_a_column", "text_b_column", "candidate_labels",
+            "epochs", "batch_size", "lr"
+        ]:
+            if hasattr(effective_adapter, attr):
+                adapter_kwargs[attr] = getattr(effective_adapter, attr)
+        adapter_kwargs.update(kwargs)
+        factory = lambda: registry.create_adapter(base_model_id, **adapter_kwargs)
 
     cv = DatasetSplitter.get_cv_splitter(
         task=task,
@@ -80,6 +92,7 @@ def run_cross_validation(
     y_series = data[target] if target in data.columns else None
     fold_scores = []
     fold_results = []
+    fold_adapters = []
     oof_predictions = [None] * len(data)
     primary_metric_key = "Macro-F1" if task == "classification" else ("MAE" if task == "regression" else "Score")
 
@@ -103,6 +116,7 @@ def run_cross_validation(
             oof_predictions[val_pos] = preds[i]
 
         val_metrics = fold_adapter.evaluate(fold_val, target_column=target, target_col=target)
+        fold_adapters.append(fold_adapter)
 
         # Extract primary metric
         if task == "classification":
@@ -133,6 +147,7 @@ def run_cross_validation(
         "std_cv_score": std_score,
         "cv_std": std_score,
         "fold_results": fold_results,
+        "fold_adapters": fold_adapters,
         "primary_metric": primary_metric_key,
         "oof_predictions": np.array(oof_predictions),
         "cv_duration_s": round(total_cv_duration, 2),
@@ -142,20 +157,22 @@ def run_cross_validation(
 def select_best_model(
     leaderboard: Union[pd.DataFrame, List[Dict[str, Any]]],
     primary_metric: Optional[str] = None,
-    higher_is_better: bool = True,
+    higher_is_better: Optional[bool] = None,
 ) -> BestModelSelection:
     """
     Selects winning model strictly based on validation/cross-validation scores.
     The held-out test set is NEVER used for model selection.
+    Automatically respects metric direction (e.g. minimizing MAE/RMSE/loss, maximizing F1/accuracy).
     """
     if isinstance(leaderboard, list):
         if not leaderboard:
             raise ValueError("Leaderboard is empty; cannot select best model.")
         metric_key = primary_metric or "mean_cv_score"
+        reverse = higher_is_better if higher_is_better is not None else is_higher_better(metric_key)
         sorted_board = sorted(
             leaderboard,
             key=lambda x: x.get(metric_key, x.get("cv_mean", 0.0)),
-            reverse=higher_is_better,
+            reverse=reverse,
         )
         best = sorted_board[0]
         best_id = str(best.get("model_id", "best_model"))
@@ -172,7 +189,8 @@ def select_best_model(
             numeric_cols = [c for c in leaderboard_df.columns if "CV" in c or "Val" in c or "Score" in c]
             metric_col = numeric_cols[0] if numeric_cols else leaderboard_df.columns[1]
 
-        sorted_df = leaderboard_df.sort_values(by=metric_col, ascending=(not higher_is_better))
+        hib = higher_is_better if higher_is_better is not None else is_higher_better(metric_col)
+        sorted_df = leaderboard_df.sort_values(by=metric_col, ascending=(not hib))
         id_col = "Model ID" if "Model ID" in sorted_df.columns else sorted_df.columns[0]
         best_id = str(sorted_df[id_col].iloc[0])
         best_score = float(sorted_df[metric_col].iloc[0])

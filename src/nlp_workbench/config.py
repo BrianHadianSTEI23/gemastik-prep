@@ -39,6 +39,8 @@ class WorkbenchConfig:
     text_b_column: Optional[str] = None
     target_column: Optional[str] = "category"
     id_column: Optional[str] = "id"
+    group_column: Optional[str] = None
+    time_column: Optional[str] = None
     model_ids: Optional[List[str]] = None
     
     # 2. Hardware & Environment
@@ -175,6 +177,8 @@ class WorkbenchConfig:
             "text_column": self.text_column,
             "target_column": self.target_column,
             "id_column": self.id_column,
+            "group_column": self.group_column,
+            "time_column": self.time_column,
             "model_ids": self.model_ids,
             "device": self.device,
             "random_state": self.random_state,

@@ -36,15 +36,48 @@ class TranslationAdapter(BaseTaskAdapter):
         self.pipeline = None
         self.is_trained = True
 
+    def _map_nllb_lang(self, lang: str) -> str:
+        lang_map = {
+            "id": "ind_Latn",
+            "indonesian": "ind_Latn",
+            "en": "eng_Latn",
+            "english": "eng_Latn",
+            "jv": "jav_Latn",
+            "javanese": "jav_Latn",
+            "su": "sun_Latn",
+            "sundanese": "sun_Latn",
+        }
+        return lang_map.get(lang.lower().strip(), lang)
+
     def _init_pipeline(self):
         if self.pipeline is None:
             from transformers import pipeline
             device_idx = 0 if self.device.type == "cuda" else -1
-            self.pipeline = pipeline(
-                "translation",
-                model=self.checkpoint,
-                device=device_idx,
-            )
+            is_nllb = "nllb" in self.checkpoint.lower()
+            is_mt5 = "mt5" in self.checkpoint.lower()
+
+            if is_nllb:
+                src_code = self._map_nllb_lang(self.source_lang)
+                tgt_code = self._map_nllb_lang(self.target_lang)
+                self.pipeline = pipeline(
+                    "translation",
+                    model=self.checkpoint,
+                    src_lang=src_code,
+                    tgt_lang=tgt_code,
+                    device=device_idx,
+                )
+            elif is_mt5:
+                self.pipeline = pipeline(
+                    "text2text-generation",
+                    model=self.checkpoint,
+                    device=device_idx,
+                )
+            else:
+                self.pipeline = pipeline(
+                    "translation",
+                    model=self.checkpoint,
+                    device=device_idx,
+                )
 
     def fit(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None, **kwargs) -> Dict[str, Any]:
         self._init_pipeline()
@@ -59,9 +92,26 @@ class TranslationAdapter(BaseTaskAdapter):
     def predict(self, df: pd.DataFrame, **kwargs) -> List[str]:
         self._init_pipeline()
         src_col = self.text_columns[0] if self.text_columns[0] in df.columns else "content"
+        if src_col not in df.columns:
+            # fallback to first string column
+            src_col = df.columns[0]
         sources = df[src_col].astype(str).tolist()
+
+        is_mt5 = "mt5" in self.checkpoint.lower()
+        if is_mt5:
+            prefix = f"translate {self.source_lang} to {self.target_lang}: "
+            sources = [prefix + s for s in sources]
+
         translations = self.pipeline(sources, truncation=True)
-        return [t["translation_text"] for t in translations]
+        results = []
+        for t in translations:
+            if "translation_text" in t:
+                results.append(t["translation_text"].strip())
+            elif "generated_text" in t:
+                results.append(t["generated_text"].strip())
+            else:
+                results.append(str(t))
+        return results
 
     def evaluate(self, df: pd.DataFrame, y_true: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
         target_col = kwargs.get("target_column", self.target_column)

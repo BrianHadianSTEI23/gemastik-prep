@@ -24,6 +24,7 @@ class RetrievalAdapter(BaseTaskAdapter):
         model_id: str,
         approach: str = "bm25",
         dense_checkpoint: str = "sentence-transformers/all-MiniLM-L6-v2",
+        reranker_checkpoint: Optional[str] = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         device: str = "auto",
         top_k: int = 5,
         **kwargs,
@@ -31,12 +32,14 @@ class RetrievalAdapter(BaseTaskAdapter):
         super().__init__(model_id=model_id, **kwargs)
         self.approach = approach.lower().strip()
         self.dense_checkpoint = dense_checkpoint
+        self.reranker_checkpoint = reranker_checkpoint
         self.device = HardwareManager.inspect(device).get_torch_device()
         self.top_k = top_k
         self.corpus_df: Optional[pd.DataFrame] = None
         self.bm25: Optional[BM25Okapi] = None
         self.corpus_embeddings: Optional[np.ndarray] = None
         self.dense_encoder = None
+        self.reranker = None
         self.is_trained = False
 
     def index_corpus(
@@ -104,7 +107,7 @@ class RetrievalAdapter(BaseTaskAdapter):
             norm_q = q_emb / (np.linalg.norm(q_emb, axis=1, keepdims=True) + 1e-9)
             scores = (norm_c * norm_q).sum(axis=1)
             top_indices = np.argsort(scores)[::-1][:top_k]
-        else:  # Hybrid
+        else:  # Hybrid + Cross-Encoder Reranker
             tokens = query.lower().split()
             bm25_raw = np.array(self.bm25.get_scores(tokens))
             bm25_norm = (bm25_raw - bm25_raw.min()) / (bm25_raw.max() - bm25_raw.min() + 1e-9)
@@ -115,17 +118,38 @@ class RetrievalAdapter(BaseTaskAdapter):
             dense_norm = (norm_c * norm_q).sum(axis=1)
 
             hybrid_scores = 0.5 * bm25_norm + 0.5 * dense_norm
-            top_indices = np.argsort(hybrid_scores)[::-1][:top_k]
-            scores = hybrid_scores
+            candidate_k = min(len(self.corpus_df), max(top_k * 4, 20))
+            candidate_indices = np.argsort(hybrid_scores)[::-1][:candidate_k]
+
+            if self.reranker_checkpoint:
+                if self.reranker is None:
+                    try:
+                        from sentence_transformers import CrossEncoder
+                        self.reranker = CrossEncoder(self.reranker_checkpoint, device=str(self.device))
+                    except Exception:
+                        self.reranker = False
+                if self.reranker:
+                    pairs = [[query, str(self.corpus_df.iloc[idx][self.text_col])] for idx in candidate_indices]
+                    rerank_scores = self.reranker.predict(pairs)
+                    reranked_order = np.argsort(rerank_scores)[::-1]
+                    top_indices = [candidate_indices[i] for i in reranked_order[:top_k]]
+                    score_map = {candidate_indices[i]: float(rerank_scores[i]) for i in range(len(candidate_indices))}
+                else:
+                    top_indices = candidate_indices[:top_k]
+                    score_map = {idx: float(hybrid_scores[idx]) for idx in top_indices}
+            else:
+                top_indices = candidate_indices[:top_k]
+                score_map = {idx: float(hybrid_scores[idx]) for idx in top_indices}
 
         results = []
         for idx in top_indices:
             row = self.corpus_df.iloc[idx]
+            sc = score_map[idx] if self.approach not in ["bm25", "dense"] else float(scores[idx])
             results.append({
                 "doc_id": row[self.doc_id_col],
                 "corpus_id": int(row.get("corpus_id", idx)),
                 "document": str(row[self.text_col]),
-                "score": round(float(scores[idx]), 4),
+                "score": round(sc, 4),
             })
         return results
 
@@ -175,6 +199,7 @@ class RetrievalAdapter(BaseTaskAdapter):
             "model_id": self.model_id,
             "approach": self.approach,
             "dense_checkpoint": self.dense_checkpoint,
+            "reranker_checkpoint": self.reranker_checkpoint,
             "top_k": self.top_k,
             "corpus_df": self.corpus_df,
         }
@@ -188,6 +213,7 @@ class RetrievalAdapter(BaseTaskAdapter):
             model_id=bundle["model_id"],
             approach=bundle["approach"],
             dense_checkpoint=bundle["dense_checkpoint"],
+            reranker_checkpoint=bundle.get("reranker_checkpoint"),
             top_k=bundle["top_k"],
         )
         if bundle["corpus_df"] is not None:

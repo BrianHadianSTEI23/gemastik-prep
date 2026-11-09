@@ -5,7 +5,7 @@
 [![Hardware](https://img.shields.io/badge/Hardware-NVIDIA%20RTX%203050%20(4GB%2F6GB%2F8GB)-76B900.svg)](https://www.nvidia.com/)
 [![Focus](https://img.shields.io/badge/Focus-Indonesian%20%26%20Multilingual%20NLP-orange.svg)]()
 [![Competition](https://img.shields.io/badge/Competition-Gemastik%20Data%20Mining%20Ready-green.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-39%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-51%20passed%20(100%25)-brightgreen.svg)]()
 
 A modular, hardware-aware, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`) backed by a clean Python package (`nlp_workbench`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA GeForce RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
 
@@ -115,17 +115,17 @@ Every registered architecture is connected to a genuine callable adapter with la
 | **A. Classical ML** | `classical_nb` (Complement / Multinomial Naive Bayes) | `classical_logistic` (Logistic Regression L2 / Balanced) | `classical_linear_svm` (Linear Support Vector Machine) | Accuracy, Balanced Acc, Macro-F1 |
 | **B. Transformer Classification** | `transformer_bert` (BERT / IndoBERT) | `transformer_roberta` (RoBERTa / Indo-RoBERTa) | `transformer_distilbert` (DistilBERT Sequence Classifier) | Macro-F1, Weighted-F1, Accuracy |
 | **C. Zero-Shot Classification** | `zeroshot_bart` (BART-MNLI) | `zeroshot_deberta` (DeBERTa-v3 MNLI) | `zeroshot_xlm_r` (XLM-RoBERTa XNLI Multilingual) | Macro-F1, Accuracy |
-| **D. Multilabel Classification** | `multilabel_binary_relevance` (Binary Relevance) | `multilabel_classifier_chains` (Classifier Chains) | `multilabel_transformer` (Sigmoid BCEWithLogits) | Micro-F1, Macro-F1, Hamming Loss |
+| **D. Multilabel Classification** | `multilabel_binary_relevance` (Binary Relevance) | `multilabel_classifier_chains` (Classifier Chains) | `multilabel_transformer` (Transformer BCEWithLogits + Threshold Tuning) | Micro-F1, Macro-F1, Hamming Loss |
 | **E. Text Regression** | `regression_tfidf_ridge` (TF-IDF + Ridge) | `regression_sentence_embeddings` (MiniLM + SVR / Ridge) | `regression_transformer` (Transformer Sequence Regression) | MAE, MSE, RMSE, $R^2$ |
-| **F. Token Classification (NER)** | `ner_bert` (BERT Token Classification) | `ner_roberta` (RoBERTa Token Classification) | `ner_multilingual_bert` (Multilingual BERT NER) | Entity-level Precision, Recall, F1 (`seqeval`) |
-| **G. Question Answering** | `qa_bert` (BERT Extractive QA) | `qa_roberta` (RoBERTa Extractive QA) | `qa_xlm_r` (XLM-RoBERTa Multilingual QA) | Exact Match (EM), Token-level F1 |
+| **F. Token Classification (NER)** | `ner_bert` (BERT Token Classification / Fine-tuning) | `ner_roberta` (RoBERTa Token Classification / Fine-tuning) | `ner_multilingual_bert` (Multilingual BERT NER / Fine-tuning) | Entity-level Precision, Recall, F1 (`seqeval`) |
+| **G. Question Answering** | `qa_bert` (BERT Extractive SQuAD2) | `qa_roberta` (RoBERTa Extractive SQuAD2) | `qa_xlm_r` (XLM-RoBERTa Multilingual QA) | Exact Match (EM), Token-level F1 (Multiset) |
 | **H. Text Summarization** | `summarization_bart` (DistilBART) | `summarization_pegasus` (Pegasus XSum) | `summarization_t5` (FLAN-T5 Small) | ROUGE-1, ROUGE-2, ROUGE-L |
-| **I. Machine Translation** | `translation_marian` (MarianMT id-en) | `translation_mt5` (mT5 Multilingual) | `translation_nllb` (NLLB-200 Distilled) | SacreBLEU, chrF |
+| **I. Machine Translation** | `translation_marian` (MarianMT id-en) | `translation_mt5` (mT5 Multilingual Prompt) | `translation_nllb` (NLLB-200 Distilled FLORES) | SacreBLEU, chrF |
 | **J. Text Generation / Instruct** | `generation_qwen` (Qwen2.5 0.5B Instruct) | `generation_tinyllama` (TinyLlama 1.1B Chat) | `generation_gpt` (DistilGPT-2 Causal LM) | Perplexity, Output Completeness |
 | **K. Semantic Embeddings** | `embedding_minilm` (all-MiniLM-L6-v2) | `embedding_mpnet` (all-mpnet-base-v2) | `embedding_multilingual_e5` (multilingual-e5-small) | Spearman $\rho$, Pearson Correlation |
-| **L. Information Retrieval** | `ir_bm25` (Okapi BM25) | `ir_dense_biencoder` (Dense Bi-Encoder Dot Product) | `ir_hybrid_rerank` (Hybrid BM25 + Dense Reranking) | Recall@K, Precision@K, MRR, NDCG@K |
-| **M. Topic Modeling** | `topic_lda` (Latent Dirichlet Allocation) | `topic_nmf` (Non-Negative Matrix Factorization) | `topic_ctfidf` (Embedding Clustering + c-TF-IDF) | Topic Diversity, Topic Keywords |
-| **N. Text Pair Classification** | `pair_cross_encoder` (Cross-Encoder MS-MARCO) | `pair_siamese` (Siamese Bi-Encoder Distance Metric) | `pair_transformer_clf` (Joint Sequence `[SEP]` Classifier) | Accuracy, Macro-F1, ROC-AUC |
+| **L. Information Retrieval** | `ir_bm25` (Okapi BM25) | `ir_dense_biencoder` (Dense Bi-Encoder Dot Product) | `ir_hybrid_rerank` (Hybrid Retrieval + Cross-Encoder Reranking) | Recall@K, Precision@K, MRR, NDCG@K |
+| **M. Topic Modeling** | `topic_lda` (Latent Dirichlet Allocation) | `topic_nmf` (Non-Negative Matrix Factorization) | `topic_ctfidf` (Multilingual Embedding Clustering + c-TF-IDF) | Topic Diversity, Topic Keywords |
+| **N. Text Pair Classification** | `pair_cross_encoder` (Cross-Encoder Joint Matching) | `pair_siamese` (Siamese Bi-Encoder Feature Interaction) | `pair_transformer_clf` (Joint Sequence `[SEP]` Classifier) | Accuracy, Macro-F1, ROC-AUC |
 
 ---
 
@@ -139,15 +139,16 @@ gemastik-prep/
 │       ├── config.py             # WorkbenchConfig with validation & defaults
 │       ├── hardware.py           # HardwareManager (RTX 3050 VRAM profiling)
 │       ├── data.py               # DataLoader & task synthetic generators
-│       ├── eda.py                # DataQualityAuditor & 5-point decision support
+│       ├── eda.py                # DataQualityAuditor, ExploratoryDataAnalysis, 5-point decision support
 │       ├── preprocessing.py      # TextCleaner (negations preserved) & recommender
 │       ├── splitting.py          # DatasetSplitter & LeakageAuditor
-│       ├── evaluation.py         # Standard metrics for all 14 task categories
+│       ├── evaluation.py         # Direction-aware standard metrics for all 14 task categories
 │       ├── registry.py           # ArchitectureRegistry (42 real model records)
 │       ├── training.py           # run_cross_validation & select_best_model
-│       ├── export.py             # ModelExporter & LoadedModelBundle
+│       ├── export.py             # ModelExporter & LoadedModelBundle (file & directory support)
 │       ├── inference.py          # predict_new production API
 │       ├── competition.py        # GemastikRunner for competition submissions
+│       ├── orchestration.py      # Central ExperimentRunner & ExperimentResult
 │       └── tasks/                # Real callable task adapters
 │           ├── base.py
 │           ├── classification.py
@@ -163,7 +164,7 @@ gemastik-prep/
 │           ├── topic_modeling.py
 │           ├── pair_classification.py
 │           └── zeroshot.py
-├── tests/                        # Automated Pytest suite (39 tests)
+├── tests/                        # Automated Pytest suite (51 tests)
 │   ├── conftest.py
 │   ├── test_config.py
 │   ├── test_data.py
@@ -173,7 +174,8 @@ gemastik-prep/
 │   ├── test_tasks.py
 │   ├── test_inference_export.py
 │   ├── test_competition.py
-│   └── test_training_eda.py
+│   ├── test_training_eda.py
+│   └── test_adv_metrics_ner_runner.py
 ├── .github/
 │   └── workflows/
 │       └── tests.yml             # GitHub Actions CI workflow

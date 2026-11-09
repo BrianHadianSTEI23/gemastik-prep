@@ -37,36 +37,44 @@ class ModelExporter:
     ) -> Path:
         """
         Exports the selected model adapter to disk.
-        Delegates to adapter's model-specific serialization.
+        Handles both directory-based (e.g. HuggingFace checkpoints) and single-file (joblib) artifacts.
         """
         target_dir = output_dir or export_dir or "output_model"
         output_path = Path(target_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        artifact_file = output_path / artifact_name
+        artifact_target = output_path / artifact_name
 
         # Invoke adapter's model-specific export
-        saved_path = adapter.export(artifact_file)
+        saved_path = Path(adapter.export(artifact_target))
 
-        # Update bundle with metadata, task, and cleaner_config
-        existing_bundle = joblib.load(saved_path)
-        if isinstance(existing_bundle, dict):
-            if task:
-                existing_bundle["task"] = task
-            if metadata:
-                existing_bundle["metadata"] = metadata
-            if extra_metadata:
-                existing_bundle["extra_metadata"] = extra_metadata
-            if cleaner_config:
-                existing_bundle["cleaner_config"] = cleaner_config
-            joblib.dump(existing_bundle, saved_path)
+        # Update bundle metadata in file or directory
+        meta_file = (saved_path / "metadata.joblib") if saved_path.is_dir() else saved_path
+        if meta_file.exists() and meta_file.is_file():
+            try:
+                existing_bundle = joblib.load(meta_file)
+                if isinstance(existing_bundle, dict):
+                    if task:
+                        existing_bundle["task"] = task
+                    if metadata:
+                        existing_bundle["metadata"] = metadata
+                    if extra_metadata:
+                        existing_bundle["extra_metadata"] = extra_metadata
+                    if cleaner_config:
+                        existing_bundle["cleaner_config"] = cleaner_config
+                    joblib.dump(existing_bundle, meta_file)
+            except Exception:
+                pass
 
         # Write overall manifest
         manifest = {
             "model_id": adapter.model_id,
             "adapter_class": adapter.__class__.__name__,
-            "artifact_file": str(saved_path.name),
+            "artifact_file": saved_path.name,
+            "is_directory": saved_path.is_dir(),
             "task": task or getattr(adapter, "task", "classification"),
+            "metadata": metadata or {},
             "extra_metadata": extra_metadata or {},
+            "cleaner_config": cleaner_config or {},
         }
         joblib.dump(manifest, output_path / "manifest.joblib")
 
@@ -76,15 +84,44 @@ class ModelExporter:
     def load(export_path: Union[str, Path]) -> LoadedModelBundle:
         """Loads serialized model bundle using model-specific loader."""
         p = Path(export_path)
+        manifest_path = p / "manifest.joblib" if p.is_dir() else p.parent / "manifest.joblib"
+        manifest = {}
+        if manifest_path.exists():
+            try:
+                manifest = joblib.load(manifest_path)
+            except Exception:
+                pass
+
         if p.is_dir():
-            p = p / "nlp_model_bundle.joblib"
+            if (p / "metadata.joblib").exists():
+                artifact_path = p
+                meta_file = p / "metadata.joblib"
+            elif (p / "nlp_model_bundle.joblib").exists():
+                candidate = p / "nlp_model_bundle.joblib"
+                artifact_path = candidate
+                meta_file = (candidate / "metadata.joblib") if candidate.is_dir() else candidate
+            else:
+                artifact_path = p
+                meta_file = p / "metadata.joblib"
+        else:
+            artifact_path = p
+            meta_file = p
 
-        bundle = joblib.load(p)
-        model_id = bundle.get("model_id")
+        bundle_data = {}
+        if meta_file.exists() and meta_file.is_file():
+            try:
+                bundle_data = joblib.load(meta_file)
+            except Exception:
+                pass
+
+        model_id = bundle_data.get("model_id") or manifest.get("model_id")
+        if not model_id:
+            raise ValueError(f"Could not determine model_id from {export_path}")
+
         record = registry.get_model(model_id)
+        adapter = record.adapter_cls.load(artifact_path)
 
-        # Delegate to adapter class load method
-        adapter = record.adapter_cls.load(p)
-
-        bundle_kwargs = {k: v for k, v in bundle.items() if k != "adapter"}
+        combined_info = dict(bundle_data)
+        combined_info.update(manifest)
+        bundle_kwargs = {k: v for k, v in combined_info.items() if k != "adapter"}
         return LoadedModelBundle(adapter=adapter, **bundle_kwargs)
