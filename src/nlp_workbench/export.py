@@ -13,13 +13,25 @@ from .registry import registry
 
 class LoadedModelBundle(dict):
     """
-    Wrapper for a loaded model bundle supporting both dictionary and attribute access.
+    Wrapper for a loaded model bundle supporting both dictionary and attribute access,
+    and delegating inference methods directly to the underlying adapter.
     """
     def __init__(self, adapter: BaseTaskAdapter, **kwargs):
         super().__init__(adapter=adapter, **kwargs)
         self.adapter = adapter
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+    def predict(self, *args, **kwargs):
+        return self.adapter.predict(*args, **kwargs)
+
+    def predict_proba(self, *args, **kwargs):
+        if hasattr(self.adapter, "predict_proba"):
+            return self.adapter.predict_proba(*args, **kwargs)
+        raise NotImplementedError(f"Underlying adapter '{type(self.adapter).__name__}' does not support predict_proba.")
+
+    def evaluate(self, *args, **kwargs):
+        return self.adapter.evaluate(*args, **kwargs)
 
 
 class ModelExporter:

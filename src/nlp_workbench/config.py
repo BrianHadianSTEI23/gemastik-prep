@@ -132,16 +132,23 @@ class WorkbenchConfig:
                 raise FileNotFoundError(f"Configured test set '{self.test_path}' was not found.")
 
         if self.gemastik_mode:
-            if not self.competition_test_path and self.data_path != "synthetic":
+            if not self.competition_test_path:
                 raise ValueError(
-                    "gemastik_mode=True requires 'competition_test_path' to be set."
+                    "gemastik_mode=True requires 'competition_test_path' to be configured. "
+                    "The held-out evaluation test set is strictly isolated and cannot be reused as competition input."
                 )
-            if self.competition_test_path and self.competition_test_path != "synthetic":
+            if self.competition_test_path != "synthetic":
                 p_comp = Path(self.competition_test_path)
                 if not p_comp.exists():
                     raise FileNotFoundError(
                         f"Competition test file '{self.competition_test_path}' not found."
                     )
+
+        # Splitting validation
+        if self.split_strategy == "group" and not self.group_column:
+            raise ValueError("split_strategy='group' requires 'group_column' to be configured.")
+        if self.split_strategy == "time" and not self.time_column:
+            raise ValueError("split_strategy='time' requires 'time_column' to be configured.")
 
         # Task-specific schema checks
         if self.task in ["classification", "regression"] and not self.target_column:
@@ -161,6 +168,14 @@ class WorkbenchConfig:
                 raise ValueError(
                     "Zero-shot classification requires 'task_params[\"candidate_labels\"]' "
                     "with a list of at least 2 label names."
+                )
+
+        if self.task == "multilabel":
+            target_cols = self.task_params.get("target_columns")
+            if not target_cols and not self.target_column:
+                raise ValueError(
+                    "Multilabel classification requires 'target_column' (delimited string) "
+                    "or 'task_params[\"target_columns\"]' (list of binary indicator columns)."
                 )
 
     def validate_for_execution(self) -> None:
@@ -205,43 +220,98 @@ class WorkbenchConfig:
 
 def get_default_config(task: str = "classification", language: str = "indonesian") -> WorkbenchConfig:
     """Returns a ready-to-run default configuration for a given task and language."""
+    task = task.lower().strip()
     cfg = WorkbenchConfig(task=task, language=language)
+
     if task == "classification":
         cfg.text_columns = ["text"]
         cfg.text_column = "text"
         cfg.target_column = "target"
-    elif task == "pair_classification":
-        cfg.text_columns = ["text_a"]
-        cfg.text_column = "text_a"
-        cfg.text_b_column = "text_b"
-        cfg.task_params["text_b_column"] = "text_b"
-        cfg.target_column = "label"
-    elif task == "similarity":
-        cfg.text_columns = ["text_a"]
-        cfg.text_column = "text_a"
-        cfg.text_b_column = "text_b"
-        cfg.task_params["text_b_column"] = "text_b"
-        cfg.target_column = "similarity_score"
-    elif task == "qa":
-        cfg.text_columns = ["question"]
-        cfg.text_column = "question"
-        cfg.task_params["context_column"] = "context"
-        cfg.task_params["answer_column"] = "answer_text"
+        cfg.model_ids = ["classical_nb", "classical_logistic"]
+    elif task == "zeroshot":
+        cfg.text_columns = ["text"]
+        cfg.text_column = "text"
+        cfg.target_column = "target"
+        cfg.task_params = {
+            "candidate_labels": ["Teknologi", "Ekonomi", "Kesehatan", "Pendidikan", "Olahraga"],
+            "hypothesis_template": "Teks ini mengenai {}.",
+        }
+        cfg.model_ids = ["zeroshot_xlm_r"]
+    elif task == "multilabel":
+        cfg.text_columns = ["text"]
+        cfg.text_column = "text"
+        cfg.target_column = None
+        cfg.task_params = {"target_columns": ["label_tech", "label_biz", "label_health"]}
+        cfg.model_ids = ["multilabel_binary_relevance", "multilabel_classifier_chains"]
+    elif task == "regression":
+        cfg.text_columns = ["text"]
+        cfg.text_column = "text"
+        cfg.target_column = "target"
+        cfg.model_ids = ["regression_tfidf_ridge", "regression_sentence_embeddings"]
     elif task == "ner":
         cfg.text_columns = ["tokens"]
         cfg.text_column = "tokens"
         cfg.target_column = "ner_tags"
+        cfg.model_ids = ["ner_bert"]
+    elif task == "qa":
+        cfg.text_columns = ["question"]
+        cfg.text_column = "question"
+        cfg.target_column = "answer_text"
+        cfg.task_params = {
+            "context_column": "context",
+            "question_column": "question",
+            "answer_column": "answer_text",
+        }
+        cfg.model_ids = ["qa_bert", "qa_roberta"]
     elif task == "summarization":
         cfg.text_columns = ["document"]
         cfg.text_column = "document"
         cfg.target_column = "summary"
+        cfg.model_ids = ["summarization_bart"]
     elif task == "translation":
         cfg.text_columns = ["source_text"]
         cfg.text_column = "source_text"
         cfg.target_column = "target_text"
+        cfg.task_params = {
+            "source_lang": "id" if language == "indonesian" else "en",
+            "target_lang": "en" if language == "indonesian" else "id",
+        }
+        cfg.model_ids = ["translation_marian"]
+    elif task == "generation":
+        cfg.text_columns = ["prompt"]
+        cfg.text_column = "prompt"
+        cfg.target_column = "reference_output"
+        cfg.model_ids = ["generation_qwen"]
+    elif task == "similarity":
+        cfg.text_columns = ["text_a", "text_b"]
+        cfg.text_column = "text_a"
+        cfg.text_b_column = "text_b"
+        cfg.task_params = {"text_b_column": "text_b"}
+        cfg.target_column = "similarity_score"
+        cfg.model_ids = ["embedding_minilm"]
     elif task == "retrieval":
         cfg.text_columns = ["query"]
         cfg.text_column = "query"
-        cfg.task_params["corpus_text_column"] = "text"
         cfg.target_column = "relevance"
+        cfg.task_params = {
+            "corpus_text_column": "document",
+            "corpus_id_column": "doc_id",
+            "query_id_column": "query_id",
+            "query_text_column": "query",
+            "relevance_column": "relevance",
+        }
+        cfg.model_ids = ["ir_bm25", "ir_dense_biencoder"]
+    elif task == "topic_modeling":
+        cfg.text_columns = ["content"]
+        cfg.text_column = "content"
+        cfg.target_column = None
+        cfg.task_params = {"n_topics": 5, "top_words_count": 10}
+        cfg.model_ids = ["topic_lda", "topic_nmf"]
+    elif task == "pair_classification":
+        cfg.text_columns = ["text_a", "text_b"]
+        cfg.text_column = "text_a"
+        cfg.text_b_column = "text_b"
+        cfg.task_params = {"text_b_column": "text_b"}
+        cfg.target_column = "label"
+        cfg.model_ids = ["pair_cross_encoder", "pair_siamese"]
     return cfg

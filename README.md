@@ -5,7 +5,7 @@
 [![Hardware](https://img.shields.io/badge/Hardware-NVIDIA%20RTX%203050%20(4GB%2F6GB%2F8GB)-76B900.svg)](https://www.nvidia.com/)
 [![Focus](https://img.shields.io/badge/Focus-Indonesian%20%26%20Multilingual%20NLP-orange.svg)]()
 [![Competition](https://img.shields.io/badge/Competition-Gemastik%20Data%20Mining%20Ready-green.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-51%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-99%20passed%20(100%25)-brightgreen.svg)]()
 
 A modular, hardware-aware, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`) backed by a clean Python package (`nlp_workbench`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA GeForce RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
 
@@ -164,16 +164,21 @@ gemastik-prep/
 │           ├── topic_modeling.py
 │           ├── pair_classification.py
 │           └── zeroshot.py
-├── tests/                        # Automated Pytest suite (51 tests)
+├── tests/                        # Automated Pytest suite (99 tests)
 │   ├── conftest.py
 │   ├── test_config.py
 │   ├── test_data.py
 │   ├── test_splitting.py
+│   ├── test_splitting_leakage.py
 │   ├── test_registry.py
 │   ├── test_metrics.py
 │   ├── test_tasks.py
+│   ├── test_defaults_and_schemas.py
+│   ├── test_model_selection_validity.py
+│   ├── test_orchestration_lifecycle.py
 │   ├── test_inference_export.py
 │   ├── test_competition.py
+│   ├── test_competition_isolation.py
 │   ├── test_training_eda.py
 │   └── test_adv_metrics_ner_runner.py
 ├── .github/
@@ -225,11 +230,30 @@ To run an experiment, open `nlp_workbench.ipynb` and configure the control cente
 from nlp_workbench import get_default_config
 
 config = get_default_config(task="classification", language="indonesian")
-config.dataset_path = "path/to/dataset.csv"  # or "synthetic"
+config.data_path = "path/to/dataset.csv"  # or "synthetic"
 config.text_column = "text"
 config.target_column = "target"
 config.device = "auto"
-config.gemastik_mode = True
+config.gemastik_mode = False
+```
+
+Or execute programmatically using the canonical staged lifecycle:
+
+```python
+from nlp_workbench import ExperimentRunner, get_default_config
+
+config = get_default_config(task="classification")
+runner = ExperimentRunner(config)
+
+# Stage 1: Ingestion, Schema Check, EDA, Decision Board, Splitting, 3-Way Leakage Audit
+prepared = runner.prepare()
+
+# Stage 2: Fold-Local Benchmark, Leaderboard, Model Selection, Held-Out Test, Export
+result = runner.run(prepared)
+
+print(result.leaderboard)
+print("Winning Model:", result.best_model_id)
+print("Held-out Test Metrics:", result.test_metrics)
 ```
 
 Execute cells sequentially from top to bottom.

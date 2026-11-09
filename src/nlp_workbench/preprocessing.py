@@ -44,7 +44,7 @@ class PreprocessingRecommendation:
 
 def recommend_preprocessing(
     task: str,
-    model_family: str,
+    model_family: str = "classical",
     language: str = "indonesian"
 ) -> PreprocessingRecommendation:
     """

@@ -7,6 +7,7 @@ import re
 import string
 import math
 import collections
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any, Union
 import numpy as np
 import pandas as pd
@@ -23,6 +24,150 @@ from sklearn.metrics import (
     hamming_loss,
 )
 from scipy.stats import pearsonr, spearmanr
+
+
+@dataclass(frozen=True)
+class TaskEvaluationSpec:
+    """Canonical task evaluation specification governing metric choice and selection direction."""
+    task: str
+    primary_metric: str
+    higher_is_better: bool
+    secondary_metrics: List[str]
+    requires_labels: bool
+    supports_cv: bool
+    supports_auto_selection: bool
+
+
+TASK_EVALUATION_SPECS: Dict[str, TaskEvaluationSpec] = {
+    "classification": TaskEvaluationSpec(
+        task="classification",
+        primary_metric="Macro-F1",
+        higher_is_better=True,
+        secondary_metrics=["Accuracy", "Balanced Accuracy", "Weighted-F1", "Macro-Precision", "Macro-Recall"],
+        requires_labels=True,
+        supports_cv=True,
+        supports_auto_selection=True,
+    ),
+    "zeroshot": TaskEvaluationSpec(
+        task="zeroshot",
+        primary_metric="Macro-F1",
+        higher_is_better=True,
+        secondary_metrics=["Accuracy", "Balanced Accuracy", "Weighted-F1"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "multilabel": TaskEvaluationSpec(
+        task="multilabel",
+        primary_metric="Micro-F1",
+        higher_is_better=True,
+        secondary_metrics=["Macro-F1", "Hamming Loss", "Subset Accuracy"],
+        requires_labels=True,
+        supports_cv=True,
+        supports_auto_selection=True,
+    ),
+    "regression": TaskEvaluationSpec(
+        task="regression",
+        primary_metric="MAE",
+        higher_is_better=False,
+        secondary_metrics=["MSE", "RMSE", "R2"],
+        requires_labels=True,
+        supports_cv=True,
+        supports_auto_selection=True,
+    ),
+    "ner": TaskEvaluationSpec(
+        task="ner",
+        primary_metric="Entity F1 (Seqeval)",
+        higher_is_better=True,
+        secondary_metrics=["Entity Precision", "Entity Recall"],
+        requires_labels=True,
+        supports_cv=True,
+        supports_auto_selection=True,
+    ),
+    "qa": TaskEvaluationSpec(
+        task="qa",
+        primary_metric="Exact Match (EM)",
+        higher_is_better=True,
+        secondary_metrics=["Token F1"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "summarization": TaskEvaluationSpec(
+        task="summarization",
+        primary_metric="ROUGE-L F1",
+        higher_is_better=True,
+        secondary_metrics=["ROUGE-1 F1", "ROUGE-2 F1"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "translation": TaskEvaluationSpec(
+        task="translation",
+        primary_metric="SacreBLEU",
+        higher_is_better=True,
+        secondary_metrics=["chrF"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "similarity": TaskEvaluationSpec(
+        task="similarity",
+        primary_metric="Spearman Correlation",
+        higher_is_better=True,
+        secondary_metrics=["Pearson Correlation"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "retrieval": TaskEvaluationSpec(
+        task="retrieval",
+        primary_metric="NDCG@5",
+        higher_is_better=True,
+        secondary_metrics=["MRR", "Recall@5", "Precision@5"],
+        requires_labels=True,
+        supports_cv=False,
+        supports_auto_selection=True,
+    ),
+    "topic_modeling": TaskEvaluationSpec(
+        task="topic_modeling",
+        primary_metric="Topic Diversity",
+        higher_is_better=True,
+        secondary_metrics=["Total Topics"],
+        requires_labels=False,
+        supports_cv=False,
+        supports_auto_selection=False,  # Unsupervised topic diversity alone cannot automatically declare a winning model
+    ),
+    "pair_classification": TaskEvaluationSpec(
+        task="pair_classification",
+        primary_metric="Macro-F1",
+        higher_is_better=True,
+        secondary_metrics=["Accuracy", "Weighted-F1"],
+        requires_labels=True,
+        supports_cv=True,
+        supports_auto_selection=True,
+    ),
+    "generation": TaskEvaluationSpec(
+        task="generation",
+        primary_metric="Average Generated Words",
+        higher_is_better=True,
+        secondary_metrics=[],
+        requires_labels=False,
+        supports_cv=False,
+        supports_auto_selection=False,  # Output length alone cannot automatically declare a winning generation model
+    ),
+}
+
+
+def get_task_evaluation_spec(task: str) -> TaskEvaluationSpec:
+    """Returns the canonical evaluation specification for a given task."""
+    t = task.lower().strip()
+    if t not in TASK_EVALUATION_SPECS:
+        raise KeyError(
+            f"Unsupported task '{task}' in evaluation specifications. "
+            f"Supported tasks: {list(TASK_EVALUATION_SPECS.keys())}"
+        )
+    return TASK_EVALUATION_SPECS[t]
 
 
 def is_higher_better(metric_name: str) -> bool:

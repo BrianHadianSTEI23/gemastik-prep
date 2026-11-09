@@ -5,7 +5,7 @@ A modular, hardware-aware NLP experimentation framework for research and Gemasti
 
 from .config import WorkbenchConfig, get_default_config
 from .hardware import HardwareManager, HardwareProfile
-from .data import DataLoader, validate_dataset_schema
+from .data import DataLoader, validate_dataset_schema, DatasetValidator, RetrievalDatasetBundle
 from .eda import DataQualityAuditor, ExploratoryDataAnalysis
 from .preprocessing import TextCleaner, recommend_preprocessing
 from .splitting import DatasetSplitter, LeakageAuditor
@@ -15,7 +15,7 @@ from .training import run_cross_validation, select_best_model
 from .inference import predict_new
 from .export import ModelExporter
 from .competition import GemastikRunner
-from .orchestration import ExperimentRunner, ExperimentResult
+from .orchestration import ExperimentRunner, ExperimentResult, PreparedDataBundle
 
 __version__ = "1.0.0"
 
@@ -26,6 +26,8 @@ __all__ = [
     "HardwareProfile",
     "DataLoader",
     "validate_dataset_schema",
+    "DatasetValidator",
+    "RetrievalDatasetBundle",
     "DataQualityAuditor",
     "TextCleaner",
     "recommend_preprocessing",
@@ -41,4 +43,5 @@ __all__ = [
     "GemastikRunner",
     "ExperimentRunner",
     "ExperimentResult",
+    "PreparedDataBundle",
 ]

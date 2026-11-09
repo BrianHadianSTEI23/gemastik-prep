@@ -72,6 +72,7 @@ class GemastikRunner:
     ) -> np.ndarray:
         """
         Generates predictions for the test dataset using single adapter or ensemble.
+        Passes full test_df to preserve multi-column features, and aligns class universes for OOF ensembling.
         """
         adapters = ensemble_adapters if ensemble_adapters else [adapter]
 
@@ -82,30 +83,57 @@ class GemastikRunner:
         all_probs = []
 
         for model in adapters:
+            # 1. Attempt predict_proba for classification
             if hasattr(model, "predict_proba") and self.task == "classification":
                 try:
-                    probs = model.predict_proba(test_df[text_column].tolist())
-                    all_probs.append(probs)
-                    continue
-                except (AttributeError, NotImplementedError):
-                    pass
+                    probs = model.predict_proba(test_df)
+                    if probs is not None:
+                        all_probs.append(probs)
+                        continue
+                except Exception:
+                    try:
+                        probs = model.predict_proba(test_df[text_column].tolist())
+                        if probs is not None:
+                            all_probs.append(probs)
+                            continue
+                    except Exception:
+                        pass
 
-            # Standard predict
-            if text_b_column and text_b_column in test_df.columns:
-                preds = model.predict(test_df[text_column].tolist(), test_df[text_b_column].tolist())
-            else:
-                preds = model.predict(test_df[text_column].tolist())
+            # 2. Standard predict
+            try:
+                preds = model.predict(test_df)
+            except Exception:
+                if text_b_column and text_b_column in test_df.columns:
+                    preds = model.predict(test_df[text_column].tolist(), test_df[text_b_column].tolist())
+                else:
+                    preds = model.predict(test_df[text_column].tolist())
             all_preds.append(preds)
 
-        if all_probs:
-            # Average probabilities across ensemble models
-            mean_probs = np.mean(all_probs, axis=0)
-            if hasattr(adapters[0], "classes_"):
+        # Ensembling classification via aligned probability averaging
+        if all_probs and self.task == "classification":
+            all_classes_set = set()
+            for m in adapters:
+                if hasattr(m, "classes_") and m.classes_ is not None:
+                    all_classes_set.update(list(m.classes_))
+
+            if all_classes_set:
+                global_classes = np.array(sorted(list(all_classes_set)))
+                global_class_to_idx = {c: i for i, c in enumerate(global_classes)}
+                aligned_probs_list = []
+                for m, p in zip(adapters, all_probs):
+                    if hasattr(m, "classes_") and m.classes_ is not None and len(m.classes_) == p.shape[1]:
+                        aligned = np.zeros((len(test_df), len(global_classes)), dtype=float)
+                        for local_idx, c in enumerate(m.classes_):
+                            aligned[:, global_class_to_idx[c]] = p[:, local_idx]
+                        aligned_probs_list.append(aligned)
+                    else:
+                        aligned_probs_list.append(p)
+                mean_probs = np.mean(aligned_probs_list, axis=0)
                 class_indices = np.argmax(mean_probs, axis=1)
-                final_preds = adapters[0].classes_[class_indices]
+                return global_classes[class_indices]
             else:
-                final_preds = np.argmax(mean_probs, axis=1)
-            return final_preds
+                mean_probs = np.mean(all_probs, axis=0)
+                return np.argmax(mean_probs, axis=1)
 
         if len(all_preds) == 1:
             return np.array(all_preds[0])

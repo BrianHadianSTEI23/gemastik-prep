@@ -2,9 +2,9 @@ name: NLP Workbench CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "fix/**" ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, "fix/**" ]
 
 jobs:
   test:
@@ -31,3 +31,17 @@ jobs:
     - name: Run pytest test suite
       run: |
         pytest tests/ -v
+
+    - name: Verify clean Jupyter Notebook execution
+      run: |
+        python -c "
+        import json
+        with open('nlp_workbench.ipynb') as f:
+            nb = json.load(f)
+        env = {}
+        for i, cell in enumerate(nb['cells']):
+            if cell['cell_type'] == 'code':
+                code = ''.join(cell['source'])
+                exec(code, env)
+        print('Jupyter Notebook executed successfully from clean state.')
+        "

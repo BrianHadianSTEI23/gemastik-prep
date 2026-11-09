@@ -1,6 +1,6 @@
 """
 Dataset Splitting and Data Leakage Prevention module.
-Supports Stratified, Group, Time-based, and K-Fold splits with comprehensive leakage auditing.
+Supports Stratified, Group, Time-based, and K-Fold splits with comprehensive 3-way leakage auditing.
 """
 
 from typing import Dict, List, Optional, Tuple, Any, Union, Iterable
@@ -13,6 +13,8 @@ from sklearn.model_selection import (
     GroupKFold,
     GroupShuffleSplit,
 )
+
+from .data import RetrievalDatasetBundle
 
 
 class DatasetSplitter:
@@ -29,7 +31,7 @@ class DatasetSplitter:
         val_size: float = 0.1,
         random_state: int = 42,
     ):
-        self.strategy = strategy.lower()
+        self.strategy = strategy.lower().strip()
         self.n_splits = n_splits
         self.test_size = test_size
         self.val_size = val_size
@@ -37,16 +39,53 @@ class DatasetSplitter:
 
     def split(
         self,
-        df: pd.DataFrame,
+        df: Union[pd.DataFrame, RetrievalDatasetBundle],
         target_col: Optional[str] = None,
         group_col: Optional[str] = None,
         time_col: Optional[str] = None,
         task: str = "classification",
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[Union[pd.DataFrame, RetrievalDatasetBundle], Union[pd.DataFrame, RetrievalDatasetBundle], Union[pd.DataFrame, RetrievalDatasetBundle]]:
         """
-        Splits dataset into 3 partitions: train_df, val_df, test_df.
-        Ensures strict row preservation and zero leakage.
+        Splits dataset into 3 partitions: train, val, and held-out test.
+        Ensures strict row preservation, zero leakage, and support for RetrievalDatasetBundle.
         """
+        if isinstance(df, RetrievalDatasetBundle):
+            q_train, q_val, q_test = self.split(
+                df=df.queries_df,
+                target_col=target_col if target_col in df.queries_df.columns else None,
+                group_col=group_col,
+                time_col=time_col,
+                task="classification" if (target_col and target_col in df.queries_df.columns) else "regression",
+            )
+            train_bundle = RetrievalDatasetBundle(
+                corpus_df=df.corpus_df.copy(),
+                queries_df=q_train,
+                doc_id_col=df.doc_id_col,
+                doc_text_col=df.doc_text_col,
+                query_id_col=df.query_id_col,
+                query_text_col=df.query_text_col,
+                relevance_col=df.relevance_col,
+            )
+            val_bundle = RetrievalDatasetBundle(
+                corpus_df=df.corpus_df.copy(),
+                queries_df=q_val,
+                doc_id_col=df.doc_id_col,
+                doc_text_col=df.doc_text_col,
+                query_id_col=df.query_id_col,
+                query_text_col=df.query_text_col,
+                relevance_col=df.relevance_col,
+            )
+            test_bundle = RetrievalDatasetBundle(
+                corpus_df=df.corpus_df.copy(),
+                queries_df=q_test,
+                doc_id_col=df.doc_id_col,
+                doc_text_col=df.doc_text_col,
+                query_id_col=df.query_id_col,
+                query_text_col=df.query_text_col,
+                relevance_col=df.relevance_col,
+            )
+            return train_bundle, val_bundle, test_bundle
+
         if len(df) < 3:
             raise ValueError(f"Dataset has {len(df)} rows, cannot split into train/val/test.")
 
@@ -116,15 +155,27 @@ class DatasetSplitter:
             raise ValueError(f"Dataset has {len(df)} rows, cannot split.")
 
         # 1. Time-based split (temporal ordering)
-        if time_column and time_column in df.columns:
+        if time_column:
+            if time_column not in df.columns:
+                raise ValueError(f"Configured time_column '{time_column}' not found in dataset.")
             sorted_df = df.sort_values(by=time_column).reset_index(drop=True)
             split_idx = int(len(sorted_df) * (1.0 - test_size))
+            if split_idx <= 0 or split_idx >= len(sorted_df):
+                split_idx = max(1, len(sorted_df) - 1)
             train_df = sorted_df.iloc[:split_idx].copy().reset_index(drop=True)
             test_df = sorted_df.iloc[split_idx:].copy().reset_index(drop=True)
             return train_df, test_df
 
         # 2. Group-based split (prevents user/document contamination)
-        if group_column and group_column in df.columns:
+        if group_column:
+            if group_column not in df.columns:
+                raise ValueError(f"Configured group_column '{group_column}' not found in dataset.")
+            unique_groups = df[group_column].unique()
+            if len(unique_groups) < 2:
+                raise ValueError(
+                    f"Configured group_column '{group_column}' has only {len(unique_groups)} group. "
+                    f"Group splitting requires at least 2 distinct groups."
+                )
             gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
             train_idx, test_idx = next(gss.split(df, groups=df[group_column]))
             train_df = df.iloc[train_idx].copy().reset_index(drop=True)
@@ -164,7 +215,8 @@ class DatasetSplitter:
 
 class LeakageAuditor:
     """
-    Audits partitions for data leakage: duplicate texts, ID overlap, and group overlap.
+    Audits partitions for data leakage across all split combinations:
+    duplicate texts, ID overlap, and group overlap across Train/Val, Train/Test, and Val/Test.
     """
 
     def audit(
@@ -201,7 +253,7 @@ class LeakageAuditor:
         group_col: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Investigates exact duplicate texts, ID overlap, and group overlap across splits.
+        Investigates exact duplicate texts, ID overlap, and group overlap between two splits.
         """
         cols = text_columns or ([text_col] if text_col else [])
         valid_text_cols = [c for c in cols if c in train_df.columns and c in test_df.columns]
@@ -242,3 +294,161 @@ class LeakageAuditor:
             "group_leakage_detected": group_leakage,
             "leakage_detected": leakage_detected,
         }
+
+    @classmethod
+    def audit_all_splits(
+        cls,
+        train_df: Union[pd.DataFrame, RetrievalDatasetBundle],
+        val_df: Union[pd.DataFrame, RetrievalDatasetBundle],
+        test_df: Union[pd.DataFrame, RetrievalDatasetBundle],
+        text_columns: Optional[List[str]] = None,
+        text_col: Optional[str] = None,
+        id_column: Optional[str] = None,
+        group_column: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Audits all 3 split pairs: Train/Val, Train/Test, and Val/Test.
+        """
+        # Unwrap RetrievalDatasetBundle to queries_df if needed
+        tr = train_df.queries_df if isinstance(train_df, RetrievalDatasetBundle) else train_df
+        va = val_df.queries_df if isinstance(val_df, RetrievalDatasetBundle) else val_df
+        te = test_df.queries_df if isinstance(test_df, RetrievalDatasetBundle) else test_df
+
+        train_val = cls.audit_splits(
+            train_df=tr,
+            test_df=va,
+            text_columns=text_columns,
+            text_col=text_col,
+            id_column=id_column,
+            group_column=group_column,
+        )
+        train_test = cls.audit_splits(
+            train_df=tr,
+            test_df=te,
+            text_columns=text_columns,
+            text_col=text_col,
+            id_column=id_column,
+            group_column=group_column,
+        )
+        val_test = cls.audit_splits(
+            train_df=va,
+            test_df=te,
+            text_columns=text_columns,
+            text_col=text_col,
+            id_column=id_column,
+            group_column=group_column,
+        )
+
+        leakage_detected = (
+            train_val["leakage_detected"]
+            or train_test["leakage_detected"]
+            or val_test["leakage_detected"]
+        )
+
+        total_dup = (
+            train_val["duplicate_text_count"]
+            + train_test["duplicate_text_count"]
+            + val_test["duplicate_text_count"]
+        )
+        total_id_overlap = (
+            train_val["id_overlap_count"]
+            + train_test["id_overlap_count"]
+            + val_test["id_overlap_count"]
+        )
+        total_group_overlap = (
+            train_val["group_overlap_count"]
+            + train_test["group_overlap_count"]
+            + val_test["group_overlap_count"]
+        )
+
+        return {
+            "leakage_detected": leakage_detected,
+            "train_val": train_val,
+            "train_test": train_test,
+            "val_test": val_test,
+            "total_duplicate_text_count": total_dup,
+            "total_id_overlap_count": total_id_overlap,
+            "total_group_overlap_count": total_group_overlap,
+            "text_leakage_detected": (
+                train_val["text_leakage_detected"]
+                or train_test["text_leakage_detected"]
+                or val_test["text_leakage_detected"]
+            ),
+            "id_leakage_detected": (
+                train_val["id_leakage_detected"]
+                or train_test["id_leakage_detected"]
+                or val_test["id_leakage_detected"]
+            ),
+            "group_leakage_detected": (
+                train_val["group_leakage_detected"]
+                or train_test["group_leakage_detected"]
+                or val_test["group_leakage_detected"]
+            ),
+        }
+
+    @classmethod
+    def enforce_leakage_policy(
+        cls,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        text_columns: Optional[List[str]] = None,
+        id_column: Optional[str] = None,
+        group_column: Optional[str] = None,
+        deduplicate_texts: bool = False,
+        raise_on_leakage: bool = True,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
+        """
+        Enforces leakage policy across train, val, and test partitions.
+        If deduplicate_texts is True, removes leaking rows from val and test.
+        If prohibited leakage remains and raise_on_leakage is True, raises ValueError.
+        Never executes a silent pass!
+        """
+        audit_res = cls.audit_all_splits(
+            train_df=train_df,
+            val_df=val_df,
+            test_df=test_df,
+            text_columns=text_columns,
+            id_column=id_column,
+            group_column=group_column,
+        )
+
+        if not audit_res["leakage_detected"]:
+            return train_df, val_df, test_df, audit_res
+
+        # If deduplication requested, purge duplicates from val and test
+        if deduplicate_texts and audit_res["text_leakage_detected"]:
+            cols = [c for c in (text_columns or []) if c in train_df.columns]
+            if cols:
+                tr_texts = set(train_df[cols].fillna("").astype(str).agg(" ".join, axis=1).str.strip())
+                val_mask = ~val_df[cols].fillna("").astype(str).agg(" ".join, axis=1).str.strip().isin(tr_texts)
+                val_df = val_df[val_mask].reset_index(drop=True)
+
+                all_seen = tr_texts.union(set(val_df[cols].fillna("").astype(str).agg(" ".join, axis=1).str.strip()))
+                test_mask = ~test_df[cols].fillna("").astype(str).agg(" ".join, axis=1).str.strip().isin(all_seen)
+                test_df = test_df[test_mask].reset_index(drop=True)
+
+                # Re-audit after deduplication
+                audit_res = cls.audit_all_splits(
+                    train_df=train_df,
+                    val_df=val_df,
+                    test_df=test_df,
+                    text_columns=text_columns,
+                    id_column=id_column,
+                    group_column=group_column,
+                )
+
+        if audit_res["leakage_detected"] and raise_on_leakage:
+            details = []
+            if audit_res["train_val"]["leakage_detected"]:
+                details.append(f"Train/Val: {audit_res['train_val']['duplicate_text_count']} duplicate texts, {audit_res['train_val']['id_overlap_count']} overlapping IDs, {audit_res['train_val']['group_overlap_count']} overlapping groups")
+            if audit_res["train_test"]["leakage_detected"]:
+                details.append(f"Train/Test: {audit_res['train_test']['duplicate_text_count']} duplicate texts, {audit_res['train_test']['id_overlap_count']} overlapping IDs, {audit_res['train_test']['group_overlap_count']} overlapping groups")
+            if audit_res["val_test"]["leakage_detected"]:
+                details.append(f"Val/Test: {audit_res['val_test']['duplicate_text_count']} duplicate texts, {audit_res['val_test']['id_overlap_count']} overlapping IDs, {audit_res['val_test']['group_overlap_count']} overlapping groups")
+            raise ValueError(
+                f"Data leakage detected across dataset splits violating experimental integrity policy: "
+                f"{'; '.join(details)}. Set deduplicate_texts=True to purge or fix data partitioning."
+            )
+
+        return train_df, val_df, test_df, audit_res

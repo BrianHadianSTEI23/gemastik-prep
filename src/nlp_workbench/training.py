@@ -13,7 +13,7 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from .tasks.base import BaseTaskAdapter
 from .splitting import DatasetSplitter
 from .registry import registry
-from .evaluation import is_higher_better
+from .evaluation import is_higher_better, get_task_evaluation_spec
 
 
 class BestModelSelection(str):
@@ -75,7 +75,8 @@ def run_cross_validation(
             "source_lang", "target_lang", "model_type", "n_topics", "random_state",
             "text_columns", "target_column", "context_column", "question_column",
             "answer_column", "text_a_column", "text_b_column", "candidate_labels",
-            "epochs", "batch_size", "lr"
+            "epochs", "num_epochs", "batch_size", "lr", "learning_rate", "max_seq_length",
+            "device", "threshold", "cleaner"
         ]:
             if hasattr(effective_adapter, attr):
                 adapter_kwargs[attr] = getattr(effective_adapter, attr)
@@ -94,7 +95,12 @@ def run_cross_validation(
     fold_results = []
     fold_adapters = []
     oof_predictions = [None] * len(data)
-    primary_metric_key = "Macro-F1" if task == "classification" else ("MAE" if task == "regression" else "Score")
+
+    try:
+        spec = get_task_evaluation_spec(task)
+        primary_metric_key = spec.primary_metric
+    except KeyError:
+        primary_metric_key = "Macro-F1" if task == "classification" else ("MAE" if task == "regression" else "Score")
 
     split_generator = cv.split(data, y=y_series, groups=data[group_column] if group_column else None)
 
@@ -119,7 +125,9 @@ def run_cross_validation(
         fold_adapters.append(fold_adapter)
 
         # Extract primary metric
-        if task == "classification":
+        if primary_metric_key in val_metrics:
+            score = val_metrics[primary_metric_key]
+        elif task == "classification":
             score = val_metrics.get("Macro-F1", val_metrics.get("Accuracy", 0.0))
         elif task == "regression":
             score = val_metrics.get("MAE", 0.0)
@@ -156,27 +164,83 @@ def run_cross_validation(
 
 def select_best_model(
     leaderboard: Union[pd.DataFrame, List[Dict[str, Any]]],
+    task: Optional[str] = None,
     primary_metric: Optional[str] = None,
     higher_is_better: Optional[bool] = None,
 ) -> BestModelSelection:
     """
     Selects winning model strictly based on validation/cross-validation scores.
     The held-out test set is NEVER used for model selection.
-    Automatically respects metric direction (e.g. minimizing MAE/RMSE/loss, maximizing F1/accuracy).
+    Automatically respects metric direction (e.g. minimizing MAE/RMSE/loss, maximizing F1/accuracy),
+    enforces fair comparison across candidates on the same metric, and rejects incompatible comparisons.
     """
+    if task:
+        spec = get_task_evaluation_spec(task)
+        if not spec.supports_auto_selection and primary_metric is None and higher_is_better is None:
+            raise ValueError(
+                f"Task '{task}' does not support automatic winner selection without an explicitly configured primary metric and direction."
+            )
+
     if isinstance(leaderboard, list):
         if not leaderboard:
             raise ValueError("Leaderboard is empty; cannot select best model.")
-        metric_key = primary_metric or "mean_cv_score"
-        reverse = higher_is_better if higher_is_better is not None else is_higher_better(metric_key)
-        sorted_board = sorted(
-            leaderboard,
-            key=lambda x: x.get(metric_key, x.get("cv_mean", 0.0)),
-            reverse=reverse,
-        )
-        best = sorted_board[0]
-        best_id = str(best.get("model_id", "best_model"))
-        best_score = float(best.get(metric_key, best.get("cv_mean", 0.0)))
+
+        # Check candidate reported primary metrics for comparability
+        reported_metrics = [e.get("primary_metric") for e in leaderboard if e.get("primary_metric")]
+        unique_reported = sorted(list(set(reported_metrics)))
+        if len(unique_reported) > 1 and primary_metric is None:
+            raise ValueError(
+                f"Cannot compare candidates with incompatible primary metrics: {unique_reported}. "
+                f"All candidates within one leaderboard must be evaluated on the same primary metric."
+            )
+
+        # Resolve primary metric name
+        if primary_metric is not None:
+            metric_key = primary_metric
+        elif unique_reported:
+            metric_key = unique_reported[0]
+        elif task:
+            metric_key = get_task_evaluation_spec(task).primary_metric
+        else:
+            metric_key = leaderboard[0].get("primary_metric")
+            if not metric_key:
+                raise ValueError("Cannot determine primary evaluation metric for model selection.")
+
+        # Resolve higher_is_better direction from metric metadata
+        if higher_is_better is not None:
+            hib = higher_is_better
+        elif task:
+            hib = get_task_evaluation_spec(task).higher_is_better
+        else:
+            hib = is_higher_better(metric_key)
+
+        # Extract score for each candidate strictly without fake zeroes
+        scored_candidates = []
+        for e in leaderboard:
+            if metric_key in e:
+                score = e[metric_key]
+            elif "val_metrics" in e and metric_key in e["val_metrics"]:
+                score = e["val_metrics"][metric_key]
+            elif "mean_cv_score" in e and (e.get("primary_metric") == metric_key or not e.get("primary_metric")):
+                score = e["mean_cv_score"]
+            elif "primary_score" in e and (e.get("primary_metric") == metric_key or not e.get("primary_metric")):
+                score = e["primary_score"]
+            elif "Validation Score" in e and (e.get("Primary Metric") == metric_key or not e.get("Primary Metric")):
+                score = e["Validation Score"]
+            else:
+                raise ValueError(
+                    f"Candidate '{e.get('model_id')}' is missing evaluation metric '{metric_key}'. "
+                    f"Missing metrics cannot be silently converted to fake scores."
+                )
+
+            if score is None or (isinstance(score, float) and np.isnan(score)):
+                raise ValueError(
+                    f"Candidate '{e.get('model_id')}' has null/NaN for evaluation metric '{metric_key}'."
+                )
+            scored_candidates.append((e.get("model_id", "best_model"), float(score), e))
+
+        sorted_candidates = sorted(scored_candidates, key=lambda x: x[1], reverse=hib)
+        best_id, best_score, _ = sorted_candidates[0]
         return BestModelSelection(best_id, best_score)
 
     elif isinstance(leaderboard, pd.DataFrame):
@@ -184,16 +248,66 @@ def select_best_model(
         if leaderboard_df.empty:
             raise ValueError("Leaderboard is empty; cannot select best model.")
 
-        metric_col = primary_metric or "CV Score (Mean)"
-        if metric_col not in leaderboard_df.columns:
-            numeric_cols = [c for c in leaderboard_df.columns if "CV" in c or "Val" in c or "Score" in c]
-            metric_col = numeric_cols[0] if numeric_cols else leaderboard_df.columns[1]
+        # Check candidate reported primary metrics in DataFrame
+        metric_col_name = (
+            "Primary Metric" if "Primary Metric" in leaderboard_df.columns
+            else ("primary_metric" if "primary_metric" in leaderboard_df.columns else None)
+        )
+        if metric_col_name:
+            unique_metrics = leaderboard_df[metric_col_name].dropna().unique()
+            if len(unique_metrics) > 1 and primary_metric is None:
+                raise ValueError(
+                    f"Cannot compare candidates with incompatible primary metrics: {list(unique_metrics)}. "
+                    f"All candidates within one leaderboard must be evaluated on the same primary metric."
+                )
 
-        hib = higher_is_better if higher_is_better is not None else is_higher_better(metric_col)
-        sorted_df = leaderboard_df.sort_values(by=metric_col, ascending=(not hib))
-        id_col = "Model ID" if "Model ID" in sorted_df.columns else sorted_df.columns[0]
+        if primary_metric is not None:
+            metric_name = primary_metric
+        elif metric_col_name and len(leaderboard_df[metric_col_name].dropna().unique()) == 1:
+            metric_name = leaderboard_df[metric_col_name].dropna().unique()[0]
+        elif task:
+            metric_name = get_task_evaluation_spec(task).primary_metric
+        else:
+            metric_name = "Validation Score"
+
+        # Locate score column in DataFrame
+        if metric_name in leaderboard_df.columns:
+            score_col = metric_name
+        elif "Validation Score" in leaderboard_df.columns:
+            score_col = "Validation Score"
+        elif "CV Mean Score" in leaderboard_df.columns:
+            score_col = "CV Mean Score"
+        elif "mean_cv_score" in leaderboard_df.columns:
+            score_col = "mean_cv_score"
+        else:
+            numeric_cols = [
+                c for c in leaderboard_df.columns
+                if "score" in c.lower() or "val" in c.lower() or "cv" in c.lower()
+            ]
+            if numeric_cols:
+                score_col = numeric_cols[0]
+            else:
+                raise ValueError(f"Leaderboard DataFrame missing score column for '{metric_name}'.")
+
+        if leaderboard_df[score_col].isna().any():
+            raise ValueError(
+                f"Leaderboard contains null/NaN values in score column '{score_col}'. Cannot silently evaluate missing metrics."
+            )
+
+        if higher_is_better is not None:
+            hib = higher_is_better
+        elif task:
+            hib = get_task_evaluation_spec(task).higher_is_better
+        else:
+            hib = is_higher_better(metric_name)
+
+        sorted_df = leaderboard_df.sort_values(by=score_col, ascending=(not hib))
+        id_col = (
+            "Model ID" if "Model ID" in sorted_df.columns
+            else ("model_id" if "model_id" in sorted_df.columns else sorted_df.columns[0])
+        )
         best_id = str(sorted_df[id_col].iloc[0])
-        best_score = float(sorted_df[metric_col].iloc[0])
+        best_score = float(sorted_df[score_col].iloc[0])
         return BestModelSelection(best_id, best_score)
     else:
         raise TypeError(f"Unsupported leaderboard type: {type(leaderboard)}")
