@@ -141,7 +141,7 @@ class DataQualityAuditor:
                 })
 
             # Check potential target leakage
-            if self.target_column and col != self.target_column:
+            if self.target_column and self.target_column in self.df.columns and col != self.target_column:
                 if s.dtype == object and self.df[self.target_column].dtype == object:
                     match_rate = float((s.astype(str) == self.df[self.target_column].astype(str)).mean())
                     if match_rate > 0.80:
@@ -261,7 +261,7 @@ class DataQualityAuditor:
                 })
 
         # 3. Supervised Target Diagnostics
-        if self.target_column:
+        if self.target_column and self.target_column in self.df.columns:
             t = self.df[self.target_column].dropna()
             if self.task == "regression" or (pd.api.types.is_numeric_dtype(t) and t.nunique() > 20):
                 skew = float(t.skew())

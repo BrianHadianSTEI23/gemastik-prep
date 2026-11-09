@@ -117,3 +117,83 @@ def test_retrieval_query_deduplication():
     ranked = adapter.predict(queries_df)
     assert len(ranked) == 3
     assert ranked["Q1_a"] == ranked["Q1_b"]  # Identical results for identical queries
+
+
+def test_retrieval_insufficient_queries_raises_error():
+    """Retrieval query-level splitting requires at least 3 unique queries to split into train, val, test."""
+    corpus_df = pd.DataFrame({
+        "doc_id": ["D1", "D2", "D3"],
+        "document": ["Text 1", "Text 2", "Text 3"],
+    })
+    queries_df = pd.DataFrame({
+        "query_id": ["Q1", "Q2"],
+        "query": ["Search 1", "Search 2"],
+    })
+    bundle = RetrievalDatasetBundle(corpus_df=corpus_df, queries_df=queries_df)
+    splitter = DatasetSplitter()
+    with pytest.raises(ValueError, match="must contain at least 3 unique queries"):
+        splitter.split(bundle)
+
+
+def test_retrieval_duplicate_judgments_rejected(tmp_path):
+    """Qrels file with duplicate (query_id, doc_id) judgments must raise ValueError."""
+    c_path = tmp_path / "c.csv"
+    q_path = tmp_path / "q.csv"
+    r_path = tmp_path / "r.csv"
+
+    pd.DataFrame({"doc_id": ["D1"], "document": ["Text"]}).to_csv(c_path, index=False)
+    pd.DataFrame({"query_id": ["Q1"], "query": ["Search"]}).to_csv(q_path, index=False)
+    pd.DataFrame({"query_id": ["Q1", "Q1"], "doc_id": ["D1", "D1"], "relevance": [1, 2]}).to_csv(r_path, index=False)
+
+    with pytest.raises(ValueError, match="Duplicate query-doc relevance judgment"):
+        DataLoader.load_retrieval_bundle(corpus_path=c_path, queries_path=q_path, qrels_path=r_path)
+
+
+def test_experiment_runner_end_to_end_retrieval_three_files(tmp_path):
+    """Full ExperimentRunner execution on 3 separate retrieval files with custom column names."""
+    from nlp_workbench.config import WorkbenchConfig
+    from nlp_workbench.orchestration import ExperimentRunner
+
+    c_path = tmp_path / "corpus.csv"
+    q_path = tmp_path / "queries.csv"
+    r_path = tmp_path / "qrels.csv"
+
+    # Corpus with non-default columns
+    pd.DataFrame({
+        "custom_did": [f"DOC_{i}" for i in range(12)],
+        "custom_body": [f"Document content about deep learning and computer science topic {i}" for i in range(12)],
+    }).to_csv(c_path, index=False)
+
+    # 6 queries with non-default columns
+    pd.DataFrame({
+        "custom_qid": [f"QRY_{i}" for i in range(6)],
+        "custom_text": [f"Search query topic {i}" for i in range(6)],
+    }).to_csv(q_path, index=False)
+
+    # Multiple qrels per query
+    qrels_rows = []
+    for i in range(6):
+        qrels_rows.append({"custom_qid": f"QRY_{i}", "custom_did": f"DOC_{i}", "custom_rel": 2})
+        qrels_rows.append({"custom_qid": f"QRY_{i}", "custom_did": f"DOC_{(i+1)%12}", "custom_rel": 1})
+    pd.DataFrame(qrels_rows).to_csv(r_path, index=False)
+
+    cfg = WorkbenchConfig(
+        task="retrieval",
+        corpus_path=str(c_path),
+        queries_path=str(q_path),
+        qrels_path=str(r_path),
+        doc_id_column="custom_did",
+        doc_text_column="custom_body",
+        query_id_column="custom_qid",
+        query_text_column="custom_text",
+        relevance_column="custom_rel",
+        model_ids=["ir_bm25"],
+        device="cpu",
+    )
+    runner = ExperimentRunner(cfg)
+    result = runner.run()
+
+    assert result.best_model_id == "ir_bm25"
+    assert "NDCG@5" in result.test_metrics
+    assert "MRR" in result.test_metrics
+    assert result.test_metrics["NDCG@5"] is not None

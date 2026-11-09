@@ -42,6 +42,16 @@ class WorkbenchConfig:
     group_column: Optional[str] = None
     time_column: Optional[str] = None
     model_ids: Optional[List[str]] = None
+
+    # Retrieval Multi-Dataset Configuration
+    corpus_path: Optional[str] = None
+    queries_path: Optional[str] = None
+    qrels_path: Optional[str] = None
+    doc_id_column: str = "doc_id"
+    doc_text_column: str = "document"
+    query_id_column: str = "query_id"
+    query_text_column: str = "query"
+    relevance_column: str = "relevance"
     
     # 2. Hardware & Environment
     device: str = "auto"  # "auto", "cuda", "cpu"
@@ -65,6 +75,7 @@ class WorkbenchConfig:
     
     # 5. User-Accepted Preprocessing & Data Quality Decisions
     accepted_decisions: Dict[str, bool] = field(default_factory=lambda: {
+        "remove_html": True,
         "enable_html_cleaning": True,
         "handle_urls": True,
         "enable_class_weights": True,
@@ -149,6 +160,15 @@ class WorkbenchConfig:
             raise ValueError("split_strategy='group' requires 'group_column' to be configured.")
         if self.split_strategy == "time" and not self.time_column:
             raise ValueError("split_strategy='time' requires 'time_column' to be configured.")
+
+        # Retrieval path verification
+        if self.task == "retrieval":
+            if self.corpus_path and self.corpus_path != "synthetic" and not Path(self.corpus_path).exists():
+                raise FileNotFoundError(f"Retrieval corpus file '{self.corpus_path}' was not found.")
+            if self.queries_path and self.queries_path != "synthetic" and not Path(self.queries_path).exists():
+                raise FileNotFoundError(f"Retrieval queries file '{self.queries_path}' was not found.")
+            if self.qrels_path and self.qrels_path != "synthetic" and not Path(self.qrels_path).exists():
+                raise FileNotFoundError(f"Retrieval qrels file '{self.qrels_path}' was not found.")
 
         # Task-specific schema checks
         if self.task in ["classification", "regression"] and not self.target_column:

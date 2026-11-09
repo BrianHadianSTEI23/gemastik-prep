@@ -5,7 +5,7 @@
 [![Hardware](https://img.shields.io/badge/Hardware-NVIDIA%20RTX%203050%20(4GB%2F6GB%2F8GB)-76B900.svg)](https://www.nvidia.com/)
 [![Focus](https://img.shields.io/badge/Focus-Indonesian%20%26%20Multilingual%20NLP-orange.svg)]()
 [![Competition](https://img.shields.io/badge/Competition-Gemastik%20Data%20Mining%20Ready-green.svg)]()
-[![Tests](https://img.shields.io/badge/pytest-118%20passed%20(100%25)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-128%20passed%20(100%25)-brightgreen.svg)]()
 
 A modular, hardware-aware, and explainable **Natural Language Processing (NLP) Experimentation Workbench** in Jupyter Notebook format (`nlp_workbench.ipynb`) backed by a clean Python package (`nlp_workbench`). Engineered specifically for resource-conscious machine learning practitioners, researchers, and data science competitors working on **NVIDIA GeForce RTX 3050 GPUs (4GB, 6GB, or 8GB VRAM)** as well as **CPU-only environments**.
 
@@ -110,22 +110,22 @@ The workbench decouples reusable engineering logic into the `nlp_workbench` pack
 
 Every registered architecture is connected to a genuine callable adapter with lazy loading, clear operational boundaries, and defensible evaluation objectives:
 
-| Task Family | Category | Approach 1 | Approach 2 | Approach 3 | Primary Metric | CV? | Auto Win? | Hardware Tier | Honest Operational Boundaries |
-| :--- | :--- | :--- | :--- | :--- | :--- | :---: | :---: | :--- | :--- |
-| **Classification** | A. Classical ML | `classical_nb` | `classical_logistic` | `classical_linear_svm` | Macro-F1 | Yes | Yes | CPU (<1GB) | Fast, leak-free TF-IDF inside cross-validation pipeline. |
-| **Classification** | B. Transformer | `transformer_bert` | `transformer_roberta` | `transformer_distilbert` | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Supervised fine-tuning; refits on train+val before test evaluation. |
-| **Zero-Shot** | C. Zero-Shot | `zeroshot_bart` | `zeroshot_deberta` | `zeroshot_xlm_r` | Macro-F1 | No | Yes | RTX 3050 (bs=4-8, fp16) | Inference-only NLI entailment on candidate label hypotheses. |
-| **Multilabel** | D. Multilabel | `multilabel_binary_relevance` | `multilabel_classifier_chains` | `multilabel_transformer` | Micro-F1 | Yes | Yes | CPU / RTX 3050 | Binary Cross Entropy with threshold tuning across multiple active labels. |
-| **Regression** | E. Regression | `regression_tfidf_ridge` | `regression_sentence_embeddings` | `regression_transformer` | MAE (lower better) | Yes | Yes | CPU / RTX 3050 | Continuous value prediction; minimizes absolute error without target string coercion. |
-| **Token Tagging** | F. NER | `ner_bert` | `ner_roberta` | `ner_multilingual_bert` | Entity F1 (`seqeval`) | Yes | Yes | RTX 3050 (bs=4-8, fp16) | Strict entity-level boundaries (PER, ORG, LOC, MISC); token classification. |
-| **QA** | G. Question Answering | `qa_bert` | `qa_roberta` | `qa_xlm_r` | Exact Match (EM) | No | Yes | RTX 3050 (bs=4, fp16) | Extractive answer span selection on passage contexts. |
-| **Summarization** | H. Summarization | `summarization_bart` | `summarization_pegasus` | `summarization_t5` | ROUGE-L F1 | No | Yes | RTX 3050 (bs=2-4, fp16) | T5 models automatically prepend `summarize:` task prefix; evaluated on references. |
-| **Translation** | I. Translation | `translation_marian` | `translation_mt5` | `translation_nllb` | SacreBLEU | No | Yes | RTX 3050 (bs=2-4, fp16) | MarianMT & NLLB provide out-of-the-box translation; mT5 is a base model requiring fine-tuning. |
-| **Generation** | J. Generation | `generation_qwen` | `generation_tinyllama` | `generation_gpt` | ROUGE-L (with refs) | No | **No** | RTX 3050 / CPU | Auto-selection prohibited without custom metric; word count cannot declare a winner; requires human rubric. |
-| **Similarity** | K. Similarity | `embedding_minilm` | `embedding_mpnet` | `embedding_multilingual_e5` | Spearman $\rho$ | No | Yes | RTX 3050 (bs=16-32, fp16) | Dense contextual cosine embeddings ranked against gold human similarity scores. |
-| **Retrieval** | L. Retrieval | `ir_bm25` | `ir_dense_biencoder` | `ir_hybrid_rerank` | NDCG@5 | No | Yes | CPU / RTX 3050 | 3 independent files (corpus, queries, qrels); query-level split; deduplicated query encoding. |
-| **Topic Modeling** | M. Topic Modeling | `topic_lda` | `topic_nmf` | `topic_ctfidf` | Topic Diversity | No | **No** | CPU / RTX 3050 | Unsupervised; topic diversity alone cannot determine winner; auto-selection prohibited without manual rubric. |
-| **Pair Matching** | N. Text Pairs | `pair_cross_encoder` | `pair_siamese` | `pair_transformer_clf` | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Distinct text_a and text_b; cross-encoder requires supervised fine-tuning on user classes. |
+| Task Family | Category | Approach 1 | Approach 2 | Approach 3 | Implementation Status | Primary Metric | CV? | Auto Win? | Hardware Tier | Honest Operational Boundaries |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :---: | :--- | :--- |
+| **Classification** | A. Classical ML | `classical_nb` | `classical_logistic` | `classical_linear_svm` | Fully Implemented | Macro-F1 | Yes | Yes | CPU (<1GB) | Fast, leak-free TF-IDF inside cross-validation pipeline. |
+| **Classification** | B. Transformer | `transformer_bert` | `transformer_roberta` | `transformer_distilbert` | Fully Implemented | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Supervised fine-tuning; refits on train+val before test evaluation. |
+| **Zero-Shot** | C. Zero-Shot | `zeroshot_bart` | `zeroshot_deberta` | `zeroshot_xlm_r` | Fully Implemented | Macro-F1 | No | Yes | RTX 3050 (bs=4-8, fp16) | Inference-only NLI entailment across candidate label hypotheses. |
+| **Multilabel** | D. Multilabel | `multilabel_binary_relevance` | `multilabel_classifier_chains` | `multilabel_transformer` | Fully Implemented | Micro-F1 | Yes | Yes | CPU / RTX 3050 | Binary Cross Entropy with threshold tuning across multiple active labels. |
+| **Regression** | E. Regression | `regression_tfidf_ridge` | `regression_sentence_embeddings` | `regression_transformer` | Fully Implemented | MAE (lower better) | Yes | Yes | CPU / RTX 3050 | Continuous value prediction; minimizes absolute error without target string coercion. |
+| **Token Tagging** | F. NER | `ner_bert` | `ner_roberta` | `ner_multilingual_bert` | Fully Implemented | Entity F1 (`seqeval`) | Yes | Yes | RTX 3050 (bs=4-8, fp16) | Strict entity-level boundaries (PER, ORG, LOC, MISC); token classification. |
+| **QA** | G. Question Answering | `qa_bert` | `qa_roberta` | `qa_xlm_r` | Fully Implemented | Exact Match (EM) | No | Yes | RTX 3050 (bs=4, fp16) | Extractive answer span selection on passage contexts. |
+| **Summarization** | H. Summarization | `summarization_bart` | `summarization_pegasus` | `summarization_t5` | Fully Implemented (BART/Pegasus); Base Adaptation Required (T5) | ROUGE-L F1 | No | Yes | RTX 3050 (bs=2-4, fp16) | T5 requires 'summarize:' prefix and task adaptation; evaluated on references. |
+| **Translation** | I. Translation | `translation_marian` | `translation_mt5` | `translation_nllb` | Fully Implemented (Marian/NLLB); Base Adaptation Required (mT5) | SacreBLEU | No | Yes | RTX 3050 (bs=2-4, fp16) | MarianMT & NLLB provide out-of-the-box translation; mT5 is a base mC4 model requiring fine-tuning. |
+| **Generation** | J. Generation | `generation_qwen` | `generation_tinyllama` | `generation_gpt` | Fully Implemented (Inference-Only) | ROUGE-L (with refs) | No | **No** | RTX 3050 / CPU | Auto-selection prohibited without custom metric; word count cannot declare a winner; requires human rubric. |
+| **Similarity** | K. Similarity | `embedding_minilm` | `embedding_mpnet` | `embedding_multilingual_e5` | Fully Implemented | Spearman $\rho$ | No | Yes | RTX 3050 (bs=16-32, fp16) | Dense contextual cosine embeddings ranked against gold human similarity scores. |
+| **Retrieval** | L. Retrieval | `ir_bm25` | `ir_dense_biencoder` | `ir_hybrid_rerank` | Fully Implemented | NDCG@5 | No | Yes | CPU / RTX 3050 | 3 independent files (corpus, queries, qrels); query-level split; deduplicated query encoding. |
+| **Topic Modeling** | M. Topic Modeling | `topic_lda` | `topic_nmf` | `topic_ctfidf` | Fully Implemented (Unsupervised) | Topic Diversity | No | **No** | CPU / RTX 3050 | Genuine empirical NPMI & UMass co-occurrence coherence over corpus tokens; auto-selection guarded without explicit objective. |
+| **Pair Matching** | N. Text Pairs | `pair_cross_encoder` | `pair_siamese` | `pair_transformer_clf` | Fully Implemented | Macro-F1 | Yes | Yes | RTX 3050 (bs=8, fp16) | Distinct text_a and text_b; cross-encoder requires supervised fine-tuning on user classes. |
 
 ---
 
@@ -189,6 +189,7 @@ gemastik-prep/
 │   ├── test_competition.py
 │   ├── test_competition_isolation.py
 │   ├── test_training_eda.py
+│   ├── test_real_dataset_workflow.py
 │   └── test_adv_metrics_ner_runner.py
 ├── .github/
 │   └── workflows/

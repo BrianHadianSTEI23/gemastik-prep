@@ -134,7 +134,18 @@ class ExperimentRunner:
 
     def load_dataset(self) -> Union[pd.DataFrame, RetrievalDatasetBundle]:
         """Loads or generates dataset based on configuration."""
-        if self.config.data_path == "synthetic":
+        if self.config.task == "retrieval" and self.config.corpus_path and self.config.queries_path:
+            data = DataLoader.load_retrieval_bundle(
+                corpus_path=self.config.corpus_path,
+                queries_path=self.config.queries_path,
+                qrels_path=self.config.qrels_path,
+                doc_id_col=self.config.doc_id_column,
+                doc_text_col=self.config.doc_text_column,
+                query_id_col=self.config.query_id_column,
+                query_text_col=self.config.query_text_column,
+                relevance_col=self.config.relevance_column,
+            )
+        elif self.config.data_path == "synthetic":
             data = DataLoader.generate_synthetic_dataset(
                 task=self.config.task,
                 language=self.config.language,
@@ -257,7 +268,14 @@ class ExperimentRunner:
         )
 
     def get_models_to_evaluate(self) -> List[str]:
-        """Resolves target model identifiers from config or task registry."""
+        """Resolves target model identifiers from config or task registry with hardware awareness."""
+        from .hardware import HardwareManager
+        import warnings
+
+        profile = HardwareManager.inspect(self.config.device)
+        is_cuda = (profile.device == "cuda" and profile.cuda_available)
+        max_vram_gb = (profile.vram_free_mb / 1024.0) if is_cuda else 0.0
+
         if self.config.model_ids and len(self.config.model_ids) > 0:
             for mid in self.config.model_ids:
                 registry.validate_model_configuration(
@@ -265,14 +283,28 @@ class ExperimentRunner:
                     task=self.config.task,
                     language=self.config.language,
                 )
+                rec = registry.get_model(mid)
+                tier = rec.vram_tier.lower()
+                if "cpu" not in tier and not is_cuda:
+                    warnings.warn(
+                        f"Configured model '{mid}' tier ({rec.vram_tier}) recommends GPU, but running on CPU. "
+                        f"Performance may be reduced."
+                    )
+                elif is_cuda and ("8gb" in tier or ">=8gb" in tier) and max_vram_gb < 7.5:
+                    warnings.warn(
+                        f"Configured model '{mid}' tier ({rec.vram_tier}) exceeds available GPU VRAM ({max_vram_gb:.1f} GB)."
+                    )
             return list(self.config.model_ids)
 
-        # Fallback to compatible models in registry
+        # Fallback to compatible models in registry passing hardware budget
         compatible_records = registry.get_compatible_models(
             task=self.config.task,
             language=self.config.language,
             device=self.config.device,
+            max_vram_gb=max_vram_gb if is_cuda else 0.0,
         )
+        if not compatible_records:
+            compatible_records = registry.list_models(task=self.config.task, language=self.config.language)
         if not compatible_records:
             compatible_records = registry.list_models(task=self.config.task)
 
@@ -342,7 +374,7 @@ class ExperimentRunner:
                 relevance_column=val_df.relevance_col,
             )
             latency = round(time.time() - t0, 3)
-            val_score = float(val_metrics.get(canonical_primary, list(val_metrics.values())[0]))
+            val_score = float(val_metrics[canonical_primary]) if (canonical_primary in val_metrics and val_metrics[canonical_primary] is not None) else None
             return {
                 "model_id": model_id,
                 "approach_name": record.approach_name,
@@ -397,13 +429,8 @@ class ExperimentRunner:
             metric_name = canonical_primary
             val_score = float(val_metrics[canonical_primary])
         else:
-            numeric_vals = [(k, v) for k, v in val_metrics.items() if isinstance(v, (int, float)) and not np.isnan(v)]
-            if numeric_vals:
-                metric_name, val_score = numeric_vals[0]
-                val_score = float(val_score)
-            else:
-                metric_name = canonical_primary
-                val_score = None
+            metric_name = canonical_primary
+            val_score = None
 
         return {
             "model_id": model_id,
@@ -502,9 +529,18 @@ class ExperimentRunner:
         has_custom_objective = bool(self.config.experimental_preferences.get("custom_selection_metric"))
         can_auto_select = task_spec.supports_auto_selection or has_custom_objective
 
-        if can_auto_select:
-            custom_metric = self.config.experimental_preferences.get("custom_selection_metric", task_spec.primary_metric)
-            custom_hib = self.config.experimental_preferences.get("custom_higher_is_better", task_spec.higher_is_better)
+        custom_metric = self.config.experimental_preferences.get("custom_selection_metric", task_spec.primary_metric)
+        custom_hib = self.config.experimental_preferences.get("custom_higher_is_better", task_spec.higher_is_better)
+
+        # Ensure valid evaluation scores exist on leaderboard before attempting automatic winner selection
+        metric_col_to_check = custom_metric if custom_metric in leaderboard_df.columns else "Validation Score"
+        has_valid_scores = (
+            not leaderboard_df.empty
+            and metric_col_to_check in leaderboard_df.columns
+            and not leaderboard_df[metric_col_to_check].isna().all()
+        )
+
+        if can_auto_select and has_valid_scores:
             best_selection = select_best_model(
                 leaderboard_df,
                 task=self.config.task,
@@ -600,8 +636,8 @@ class ExperimentRunner:
                             np.testing.assert_allclose(orig_preds, loaded_preds, rtol=1e-4, atol=1e-4)
                         else:
                             assert (orig_preds == loaded_preds).all()
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise RuntimeError(f"Exported model bundle verification failed at '{export_path}': {e}") from e
         else:
             best_id = None
             best_record = None
@@ -671,7 +707,7 @@ class ExperimentRunner:
                 test_df=comp_test_df,
                 text_column=text_col,
                 text_b_column=text_b_col,
-                ensemble_adapters=fold_adapters if len(fold_adapters) > 1 else None,
+                ensemble_adapters=None,
             )
             competition_summary = runner.create_submission(
                 test_df=comp_test_df,

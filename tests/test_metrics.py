@@ -15,6 +15,7 @@ from nlp_workbench.evaluation import (
     evaluate_similarity,
     evaluate_retrieval,
     evaluate_topic_modeling,
+    evaluate_generation,
     evaluate_predictions,
 )
 
@@ -92,3 +93,64 @@ def test_topic_modeling_metrics():
     metrics = evaluate_topic_modeling(keywords, top_n=4)
     assert "Topic Diversity" in metrics
     assert metrics["Topic Diversity"] == 1.0  # all words are distinct
+    # When reference corpus is absent, Topic Coherence must be None, never fabricated (e.g. diversity * 0.9)
+    assert metrics["Topic Coherence"] is None
+    assert "Topic Coherence Notice" in metrics
+
+
+def test_topic_coherence_distinguishes_cooccurrence_with_identical_diversity():
+    """
+    Demonstrates that genuine empirical coherence differs based on reference corpus co-occurrence,
+    even when topic diversity is 100% identical.
+    """
+    keywords = [
+        ["kucing", "anjing", "kelinci"],
+        ["mobil", "motor", "sepeda"],
+    ]
+
+    # Corpus A: High co-occurrence — words within the same topic appear together in documents
+    corpus_high_cooccurrence = [
+        "kucing anjing kelinci bermain bersama di taman",
+        "kelinci dan kucing serta anjing tidur siang",
+        "mobil motor sepeda melaju di jalan tol",
+        "sepeda dan motor parkir dekat mobil merah",
+        "anjing kucing kelinci makan bersama",
+        "motor mobil sepeda adalah alat transportasi",
+    ]
+
+    # Corpus B: Disjoint / Zero co-occurrence — words appear strictly isolated in separate documents
+    corpus_zero_cooccurrence = [
+        "hanya ada kucing di sini",
+        "seekor anjing menggonggong",
+        "kelinci putih melompat",
+        "mobil melaju di jalan",
+        "sebuah motor baru",
+        "sepeda tua di garasi",
+    ]
+
+    res_high = evaluate_topic_modeling(keywords, reference_corpus=corpus_high_cooccurrence, top_n=3)
+    res_zero = evaluate_topic_modeling(keywords, reference_corpus=corpus_zero_cooccurrence, top_n=3)
+
+    # Topic Diversity is identical across both evaluations
+    assert res_high["Topic Diversity"] == res_zero["Topic Diversity"] == 1.0
+
+    # Coherence scores MUST differ based on empirical co-occurrence
+    assert res_high["Topic Coherence"] is not None
+    assert res_zero["Topic Coherence"] is not None
+    assert res_high["Topic Coherence"] > res_zero["Topic Coherence"]
+    assert res_zero["Topic Coherence"] == -1.0  # complete absence of pair co-occurrence produces minimum NPMI
+
+
+def test_generation_without_references_never_reports_fake_quality_score():
+    """
+    Verifies that generation without references reports descriptive metrics and explicit notice,
+    without computing a fake quality score.
+    """
+    predictions = ["Model output text for test sample", "Another generated response"]
+    metrics = evaluate_generation(references=None, predictions=predictions, latencies=[25.0, 30.0])
+
+    assert metrics["ROUGE-L F1"] is None
+    assert "Evaluation Notice" in metrics
+    assert "Avg Output Words (descriptive)" in metrics
+    assert metrics["Avg Output Words (descriptive)"] > 0
+    assert "Sample Outputs" in metrics

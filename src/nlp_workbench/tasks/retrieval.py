@@ -241,6 +241,8 @@ class RetrievalAdapter(BaseTaskAdapter):
             "reranker_checkpoint": self.reranker_checkpoint,
             "top_k": self.top_k,
             "corpus_df": self.corpus_df,
+            "doc_id_col": getattr(self, "doc_id_col", "doc_id"),
+            "text_col": getattr(self, "text_col", "document"),
         }
         joblib.dump(bundle, p)
         return p
@@ -255,6 +257,8 @@ class RetrievalAdapter(BaseTaskAdapter):
             reranker_checkpoint=bundle.get("reranker_checkpoint"),
             top_k=bundle["top_k"],
         )
-        if bundle["corpus_df"] is not None:
-            adapter.index_corpus(bundle["corpus_df"])
+        doc_id_col = bundle.get("doc_id_col", "doc_id")
+        text_col = bundle.get("text_col", "document")
+        if bundle.get("corpus_df") is not None:
+            adapter.index_corpus(bundle["corpus_df"], doc_id_col=doc_id_col, text_col=text_col)
         return adapter

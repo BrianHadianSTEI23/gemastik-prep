@@ -143,8 +143,18 @@ class TopicModelingAdapter(BaseTaskAdapter):
         return np.zeros(len(df), dtype=int)
 
     def evaluate(self, df: pd.DataFrame, y_true: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
-        """Evaluates topic diversity and keyword summary."""
-        metrics = evaluate_topic_modeling(self.topic_keywords, top_n=self.top_words_count)
+        """Evaluates topic diversity and empirical topic coherence on reference documents."""
+        texts = None
+        if df is not None and len(df) > 0:
+            try:
+                texts = self._prepare_text(df, **kwargs)
+            except Exception:
+                texts = None
+        metrics = evaluate_topic_modeling(
+            self.topic_keywords,
+            reference_corpus=texts,
+            top_n=self.top_words_count,
+        )
         return metrics
 
     def export(self, export_path: Union[str, Path]) -> Path:

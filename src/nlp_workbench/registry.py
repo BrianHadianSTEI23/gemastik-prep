@@ -561,7 +561,7 @@ class ArchitectureRegistry:
             adapter_cls=SummarizationAdapter,
             adapter_kwargs={"checkpoint": "t5-small"},
             is_inference_only=True,
-            notes="Compact encoder-decoder model fitting comfortably in 4GB VRAM. Requires 'summarize: ' task prefix during inference.",
+            notes="Base pretrained T5 encoder-decoder checkpoint. Requires 'summarize: ' task prefix and task fine-tuning/adaptation for competitive domain summarization compared to dedicated fine-tuned models like distilbart-cnn-12-6.",
         ))
 
         # I. Machine Translation
@@ -589,13 +589,13 @@ class ArchitectureRegistry:
             checkpoint="google/mt5-small",
             supported_tasks=["translation"],
             supported_languages=["Indonesian", "Multilingual", "English"],
-            supported_operations=["fine-tuning", "training", "evaluation"],
+            supported_operations=["inference", "evaluation"],
             vram_tier="RTX 3050 (bs=2-4, fp16)",
             evaluation_metrics=["SacreBLEU", "chrF"],
             adapter_cls=TranslationAdapter,
             adapter_kwargs={"checkpoint": "google/mt5-small"},
-            is_inference_only=False,
-            notes="Pretrained base multilingual encoder-decoder checkpoint (mC4 span-masking). Requires supervised fine-tuning for translation; zero-shot output without fine-tuning produces masked spans.",
+            is_inference_only=True,
+            notes="Pretrained base multilingual encoder-decoder checkpoint (mC4 span-masking). Requires supervised fine-tuning/adaptation for translation; zero-shot output without fine-tuning produces masked spans.",
         ))
         self.register(ModelRecord(
             model_id="translation_nllb",
@@ -625,7 +625,7 @@ class ArchitectureRegistry:
             supported_languages=["Indonesian", "Multilingual", "English"],
             supported_operations=["inference", "evaluation"],
             vram_tier="RTX 3050 (bs=2, fp16)",
-            evaluation_metrics=["Average Generated Words", "Latency/Sample (ms)"],
+            evaluation_metrics=["ROUGE-L F1", "ROUGE-1 F1", "BLEU", "Latency/Sample (ms)"],
             adapter_cls=GenerationAdapter,
             adapter_kwargs={"checkpoint": "Qwen/Qwen2.5-0.5B-Instruct"},
             is_inference_only=True,
@@ -641,7 +641,7 @@ class ArchitectureRegistry:
             supported_languages=["English"],
             supported_operations=["inference", "evaluation"],
             vram_tier="RTX 3050 (bs=1-2, fp16)",
-            evaluation_metrics=["Average Generated Words", "Latency/Sample (ms)"],
+            evaluation_metrics=["ROUGE-L F1", "ROUGE-1 F1", "BLEU", "Latency/Sample (ms)"],
             adapter_cls=GenerationAdapter,
             adapter_kwargs={"checkpoint": "TinyLlama/TinyLlama-1.1B-Chat-v1.0"},
             is_inference_only=True,
@@ -657,7 +657,7 @@ class ArchitectureRegistry:
             supported_languages=["English"],
             supported_operations=["inference", "evaluation"],
             vram_tier="RTX 3050 (bs=4, fp16) / CPU friendly",
-            evaluation_metrics=["Average Generated Words", "Latency/Sample (ms)"],
+            evaluation_metrics=["ROUGE-L F1", "ROUGE-1 F1", "BLEU", "Latency/Sample (ms)"],
             adapter_cls=GenerationAdapter,
             adapter_kwargs={"checkpoint": "distilgpt2"},
             is_inference_only=True,

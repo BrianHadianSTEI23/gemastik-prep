@@ -74,8 +74,8 @@ class ModelExporter:
                     if cleaner_config:
                         existing_bundle["cleaner_config"] = cleaner_config
                     joblib.dump(existing_bundle, meta_file)
-            except Exception:
-                pass
+            except Exception as e:
+                raise RuntimeError(f"Failed to update metadata in exported bundle '{meta_file}': {e}") from e
 
         # Write overall manifest
         manifest = {
@@ -101,8 +101,8 @@ class ModelExporter:
         if manifest_path.exists():
             try:
                 manifest = joblib.load(manifest_path)
-            except Exception:
-                pass
+            except Exception as e:
+                raise RuntimeError(f"Failed to load manifest from '{manifest_path}': {e}") from e
 
         if p.is_dir():
             if (p / "metadata.joblib").exists():
@@ -123,8 +123,8 @@ class ModelExporter:
         if meta_file.exists() and meta_file.is_file():
             try:
                 bundle_data = joblib.load(meta_file)
-            except Exception:
-                pass
+            except Exception as e:
+                raise RuntimeError(f"Failed to load bundle data from '{meta_file}': {e}") from e
 
         model_id = bundle_data.get("model_id") or manifest.get("model_id")
         if not model_id:

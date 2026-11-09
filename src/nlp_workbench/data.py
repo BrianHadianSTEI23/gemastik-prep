@@ -177,8 +177,18 @@ class DataLoader:
         """
         corpus_df = cls.load_data(corpus_path, **kwargs)
         queries_df = cls.load_data(queries_path, **kwargs)
-        qrels_dict = None
 
+        # Check unique query IDs in queries dataset
+        if query_id_col in queries_df.columns and queries_df[query_id_col].duplicated().any():
+            dups = queries_df[query_id_col][queries_df[query_id_col].duplicated()].unique()
+            raise ValueError(f"Queries dataset contains duplicate query IDs in '{query_id_col}': {list(dups)[:5]}")
+
+        # Check unique doc IDs in corpus dataset
+        if doc_id_col in corpus_df.columns and corpus_df[doc_id_col].duplicated().any():
+            dups = corpus_df[doc_id_col][corpus_df[doc_id_col].duplicated()].unique()
+            raise ValueError(f"Corpus dataset contains duplicate document IDs in '{doc_id_col}': {list(dups)[:5]}")
+
+        qrels_dict = None
         if qrels_path is not None:
             qrels_df = cls.load_data(qrels_path, **kwargs)
             q_id_col = kwargs.get("qrels_query_id_col", query_id_col)
@@ -191,14 +201,27 @@ class DataLoader:
                     f"Found columns: {list(qrels_df.columns)}"
                 )
 
+            seen_judgments = set()
             qrels_dict = {}
             for _, r in qrels_df.iterrows():
                 qid = str(r[q_id_col])
                 did = str(r[d_id_col])
+                judgment_key = (qid, did)
+                if judgment_key in seen_judgments:
+                    raise ValueError(f"Duplicate query-doc relevance judgment found in qrels for query '{qid}' and doc '{did}'.")
+                seen_judgments.add(judgment_key)
+
+                val = r.get(r_col, 1) if r_col in qrels_df.columns else 1
                 try:
-                    rel = int(float(r.get(r_col, 1))) if r_col in qrels_df.columns else 1
-                except (ValueError, TypeError):
-                    raise ValueError(f"Malformed non-numeric relevance value '{r.get(r_col)}' in qrels file.")
+                    rel_num = float(val)
+                    if np.isnan(rel_num):
+                        raise ValueError("Relevance score is NaN.")
+                    rel = int(rel_num)
+                    if rel < 0:
+                        raise ValueError(f"Relevance score {rel} is negative; relevance judgments must be non-negative.")
+                except (ValueError, TypeError) as e:
+                    raise ValueError(f"Invalid relevance value '{val}' in qrels file: {e}")
+
                 if qid not in qrels_dict:
                     qrels_dict[qid] = {}
                 qrels_dict[qid][did] = rel

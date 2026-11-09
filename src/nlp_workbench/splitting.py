@@ -52,27 +52,24 @@ class DatasetSplitter:
         if isinstance(df, RetrievalDatasetBundle):
             # Query-level splitting to prevent query leakage across partitions
             unique_qids = df.queries_df[df.query_id_col].unique()
-            if len(unique_qids) >= 3:
-                qid_df = pd.DataFrame({df.query_id_col: unique_qids})
-                train_qids_df, val_qids_df, test_qids_df = self.split(
-                    df=qid_df,
-                    task="regression",
+            if len(unique_qids) < 3:
+                raise ValueError(
+                    f"Retrieval dataset must contain at least 3 unique queries to partition into train, val, and test, "
+                    f"but found only {len(unique_qids)} unique queries."
                 )
-                train_set = set(train_qids_df[df.query_id_col])
-                val_set = set(val_qids_df[df.query_id_col])
-                test_set = set(test_qids_df[df.query_id_col])
 
-                q_train = df.queries_df[df.queries_df[df.query_id_col].isin(train_set)].reset_index(drop=True)
-                q_val = df.queries_df[df.queries_df[df.query_id_col].isin(val_set)].reset_index(drop=True)
-                q_test = df.queries_df[df.queries_df[df.query_id_col].isin(test_set)].reset_index(drop=True)
-            else:
-                q_train, q_val, q_test = self.split(
-                    df=df.queries_df,
-                    target_col=target_col if target_col in df.queries_df.columns else None,
-                    group_col=group_col,
-                    time_col=time_col,
-                    task="classification" if (target_col and target_col in df.queries_df.columns) else "regression",
-                )
+            qid_df = pd.DataFrame({df.query_id_col: unique_qids})
+            train_qids_df, val_qids_df, test_qids_df = self.split(
+                df=qid_df,
+                task="regression",
+            )
+            train_set = set(train_qids_df[df.query_id_col])
+            val_set = set(val_qids_df[df.query_id_col])
+            test_set = set(test_qids_df[df.query_id_col])
+
+            q_train = df.queries_df[df.queries_df[df.query_id_col].isin(train_set)].reset_index(drop=True)
+            q_val = df.queries_df[df.queries_df[df.query_id_col].isin(val_set)].reset_index(drop=True)
+            q_test = df.queries_df[df.queries_df[df.query_id_col].isin(test_set)].reset_index(drop=True)
 
             # Partition qrels dict if present
             qrels_train = None
@@ -209,8 +206,15 @@ class DatasetSplitter:
             split_idx = int(len(sorted_df) * (1.0 - test_size))
             if split_idx <= 0 or split_idx >= len(sorted_df):
                 split_idx = max(1, len(sorted_df) - 1)
-            train_df = sorted_df.iloc[:split_idx].copy().reset_index(drop=True)
-            test_df = sorted_df.iloc[split_idx:].copy().reset_index(drop=True)
+
+            boundary_time = sorted_df[time_column].iloc[split_idx]
+            train_mask = sorted_df[time_column] < boundary_time
+            if train_mask.sum() > 0 and (~train_mask).sum() > 0:
+                train_df = sorted_df[train_mask].copy().reset_index(drop=True)
+                test_df = sorted_df[~train_mask].copy().reset_index(drop=True)
+            else:
+                train_df = sorted_df.iloc[:split_idx].copy().reset_index(drop=True)
+                test_df = sorted_df.iloc[split_idx:].copy().reset_index(drop=True)
             return train_df, test_df
 
         # 2. Group-based split (prevents user/document contamination)

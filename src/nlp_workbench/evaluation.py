@@ -517,29 +517,140 @@ def evaluate_retrieval(
     }
 
 
-# 10. Topic Modeling Metrics (Topic Diversity & Keyword Summary)
+# 10. Topic Modeling Metrics (Topic Diversity & Empirical Topic Coherence)
+def evaluate_topic_coherence(
+    topic_keywords: List[List[str]],
+    reference_corpus: Optional[Union[List[str], List[List[str]], pd.Series]] = None,
+    metric: str = "npmi",
+    top_n: int = 10,
+    eps: float = 1e-12,
+) -> Optional[float]:
+    """
+    Computes empirical topic coherence using topic top words and reference corpus token co-occurrence.
+    Supports:
+      - 'npmi': Normalized Pointwise Mutual Information in [-1.0, 1.0].
+      - 'umass': UMass logarithm of conditional co-occurrence frequency (typically negative).
+    Returns None if reference_corpus is absent or contains fewer than 2 documents.
+    Never fabricates coherence from diversity or constants.
+    """
+    if reference_corpus is None or not topic_keywords:
+        return None
+
+    # Convert corpus into list of token sets per document
+    if isinstance(reference_corpus, pd.Series):
+        raw_docs = reference_corpus.dropna().tolist()
+    else:
+        raw_docs = list(reference_corpus)
+
+    if len(raw_docs) < 2:
+        return None
+
+    doc_word_sets: List[set] = []
+    for doc in raw_docs:
+        if isinstance(doc, (list, tuple, set)):
+            doc_word_sets.append({str(w).lower() for w in doc})
+        elif isinstance(doc, str):
+            doc_word_sets.append(set(re.findall(r"\b\w+\b", doc.lower())))
+
+    n_docs = len(doc_word_sets)
+    if n_docs < 2:
+        return None
+
+    metric_lower = metric.lower().strip()
+    topic_scores = []
+
+    for topic in topic_keywords:
+        top_words = [str(w).lower() for w in topic[:top_n]]
+        M = len(top_words)
+        if M < 2:
+            continue
+
+        pair_scores = []
+        for m in range(1, M):
+            w_m = top_words[m]
+            d_m = sum(1 for d in doc_word_sets if w_m in d)
+            for l in range(0, m):
+                w_l = top_words[l]
+                d_l = sum(1 for d in doc_word_sets if w_l in d)
+                d_ml = sum(1 for d in doc_word_sets if w_m in d and w_l in d)
+
+                if metric_lower == "umass":
+                    # UMass: log((D(w_m, w_l) + 1) / D(w_l))
+                    score = math.log((d_ml + 1.0) / max(1.0, float(d_l)))
+                    pair_scores.append(score)
+                else:
+                    # Default: NPMI
+                    p_ml = d_ml / n_docs
+                    if d_ml == 0:
+                        pair_scores.append(-1.0)
+                    elif p_ml >= 1.0 - eps:
+                        pair_scores.append(1.0)
+                    else:
+                        p_m = d_m / n_docs
+                        p_l = d_l / n_docs
+                        pmi = math.log(p_ml / max(eps, p_m * p_l))
+                        denom = -math.log(p_ml)
+                        npmi = pmi / max(eps, denom)
+                        npmi_clamped = max(-1.0, min(1.0, npmi))
+                        pair_scores.append(npmi_clamped)
+
+        if pair_scores:
+            topic_scores.append(float(np.mean(pair_scores)))
+
+    if not topic_scores:
+        return None
+
+    return float(np.mean(topic_scores))
+
+
 def evaluate_topic_modeling(
     topic_keywords: List[List[str]],
+    reference_corpus: Optional[Union[List[str], List[List[str]], pd.Series]] = None,
     top_n: int = 10,
+    coherence_metric: str = "npmi",
 ) -> Dict[str, Any]:
     """
-    Computes Topic Diversity: fraction of unique words across top N words of all topics.
-    High diversity (> 0.7) means topics are non-repetitive.
+    Computes Topic Diversity and empirical Topic Coherence over reference corpus.
+    Topic Diversity: fraction of unique words across top N words of all topics.
+    Topic Coherence: genuine NPMI or UMass co-occurrence coherence over reference corpus tokens.
+    Returns Topic Coherence: None when reference corpus is not provided.
+    Never calculates fake coherence approximations (e.g. diversity * 0.9).
     """
     if not topic_keywords:
-        return {"Topic Diversity": 0.0, "Total Topics": 0, "Topic Coherence": 0.0}
+        return {
+            "Topic Diversity": 0.0,
+            "Total Topics": 0,
+            "Topic Coherence": None,
+            "Notice": "No topic keywords provided."
+        }
 
     words_per_topic = [topic[:top_n] for topic in topic_keywords]
     all_words = [w for t in words_per_topic for w in t]
     unique_words = set(all_words)
     diversity = len(unique_words) / max(1, len(all_words))
 
-    return {
+    coherence = evaluate_topic_coherence(
+        topic_keywords=topic_keywords,
+        reference_corpus=reference_corpus,
+        metric=coherence_metric,
+        top_n=top_n,
+    )
+
+    result = {
         "Topic Diversity": round(float(diversity), 4),
         "Total Topics": len(topic_keywords),
         "Unique Top Words": len(unique_words),
-        "Topic Coherence": round(float(min(1.0, diversity * 0.9)), 4),
+        "Topic Coherence": round(float(coherence), 4) if coherence is not None else None,
     }
+    if coherence is None:
+        result["Topic Coherence Notice"] = (
+            "Empirical topic coherence (NPMI/UMass) requires reference corpus tokens. "
+            "Reported as None when reference corpus is absent."
+        )
+    else:
+        result["Coherence Metric"] = coherence_metric.upper()
+
+    return result
 
 
 # 11. Text Generation Metrics
@@ -552,8 +663,8 @@ def evaluate_generation(
     """
     Evaluates text generation.
     Computes ROUGE-L, ROUGE-1, ROUGE-2, and BLEU when references are present.
-    When references are absent, returns descriptive statistics (length, latency)
-    and an explicit notice indicating that open generation requires human evaluation.
+    When references are absent, returns descriptive statistics (length, latency),
+    sample outputs, and an explicit notice indicating that open generation requires human evaluation.
     Never uses word count as an automatic quality metric.
     """
     preds = [str(p) for p in predictions] if predictions is not None else []
@@ -586,6 +697,7 @@ def evaluate_generation(
         res = {
             "ROUGE-L F1": None,
             "Avg Output Words (descriptive)": round(avg_words, 2),
+            "Sample Outputs": preds[:3] if preds else [],
             "Evaluation Notice": (
                 "Open-ended generation evaluated without gold references. "
                 "Human qualitative rubric evaluation required. "
